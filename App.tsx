@@ -1,10 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-// === ☁️ 免費雲端實時同步資料庫設定 (全團跨手機同步) ===
-const SUPABASE_URL = 'https://xyzcompany.supabase.co'; // 雲端同步端點
-const SUPABASE_KEY = 'public-anon-key';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import ReactDOM from 'react-dom/client';
 
 const THEME = {
   primary: '#183451',
@@ -13,23 +8,19 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// 24小時氣象預設資料
-const GENERATE_24H_WEATHER = () => {
-  const hours = [];
-  for (let i = 0; i < 24; i++) {
-    const hourStr = `${i.toString().padStart(2, '0')}:00`;
-    let icon = "☀️";
-    let temp = 28;
-    let rain = "10%";
-    if (i < 6 || i >= 19) { icon = "🌙"; temp = 26; rain = "0%"; }
-    else if (i >= 15 && i < 18) { icon = "🌧️"; temp = 29; rain = "70%"; }
-    else if (i >= 11 && i < 15) { icon = "🌤️"; temp = 33; rain = "30%"; }
-    hours.push({ time: hourStr, temp: `${temp}°`, rain: rain, icon: icon });
-  }
-  return hours;
-};
+// 預設天氣備用資料
+const DEFAULT_HOURLY_WEATHER = [
+  { time: "00:00", temp: "26°", rain: "0%", icon: "🌙" },
+  { time: "03:00", temp: "25°", rain: "0%", icon: "🌙" },
+  { time: "06:00", temp: "26°", rain: "10%", icon: "🌤️" },
+  { time: "09:00", temp: "29°", rain: "20%", icon: "☀️" },
+  { time: "12:00", temp: "33°", rain: "30%", icon: "🌤️" },
+  { time: "15:00", temp: "31°", rain: "70%", icon: "🌧️" },
+  { time: "18:00", temp: "28°", rain: "40%", icon: "⛅" },
+  { time: "21:00", temp: "27°", rain: "10%", icon: "🌙" }
+];
 
-// 預設行程
+// 8 天完整行程資料 (含精準經緯度，用於抓取當日氣象)
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
@@ -50,6 +41,54 @@ const MASTER_ITINERARY = [
       { id: "2-3", time: "停留", name: "荷蘭紅屋 & 聖地牙哥城堡", type: "景點", note: "漫步紅屋廣場", map: "", img: "https://images.unsplash.com/photo-1590001155093-a3c66ab0c3ff?auto=format&fit=crop&w=600&q=80" },
       { id: "2-4", time: "晚上", name: "雞場街夜市 (Jonker Street)", type: "景點", note: "週末夜市與海南雞飯粒", map: "", img: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=600&q=80" }
     ]
+  },
+  {
+    day: "8/17 Mon.", title: "吉隆坡城市漫遊", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
+    items: [
+      { id: "3-1", time: "09:30", name: "Ready｜吉隆坡豪亞酒店式公寓 (收拾行李)", type: "住宿", note: "當晚需換房，請收好行李", map: "", img: "" },
+      { id: "3-2", time: "10:30 - 12:00", name: "樂聖嶺天后宮", type: "景點", note: "東南亞最大媽祖廟，燈籠陣打卡點", map: "", img: "" },
+      { id: "3-3", time: "14:45 - 16:30", name: "中央市場 (Central Market)", type: "景點", note: "文創手作市集", map: "https://maps.app.goo.gl/smpbQKkoT5YwFAGq7", img: "" },
+      { id: "3-4", time: "16:30 - 21:30", name: "柏威年廣場 (Pavilion) / 亞羅街", type: "景點", note: "晚餐 + 百貨逛街換匯", map: "https://maps.app.goo.gl/Rf7sEgBUhrixPdx97", img: "" }
+    ]
+  },
+  {
+    day: "8/18 Tue.", title: "吉隆坡 → 檳城喬治市", city: "檳城", lat: 5.4141, lng: 100.3288,
+    items: [
+      { id: "4-1", time: "09:00 - 10:45", name: "【早餐】chaFei Wisma Cosway 咖椰多士", type: "飲食", note: "美味咖椰吐司", map: "https://maps.app.goo.gl/goNaQNtVyjhxcSERA", img: "" },
+      { id: "4-2", time: "11:40 - 15:15", name: "【火車】吉隆坡中央車站 → 檳城北海車站", type: "交通", note: "乘坐 ETS 高速火車", map: "", img: "" },
+      { id: "4-3", time: "16:00 - 16:20", name: "【渡輪】前往喬治市", type: "交通", note: "渡輪搭乘", map: "", img: "" },
+      { id: "4-4", time: "17:30 - 18:20", name: "姓氏橋 (Clan Jetties)", type: "景點", note: "體驗水上人家生活、觀賞落日夕陽", map: "https://maps.app.goo.gl/E5ENPqHFHnBiiUeb9", img: "https://images.unsplash.com/photo-1528181304800-259b08848526?auto=format&fit=crop&w=600&q=80" },
+      { id: "4-5", time: "19:30 -", name: "逛超市 Giant Penang Plaza", type: "景點", note: "採買零食伴手禮", map: "https://maps.app.goo.gl/zi2r7GcbqgAFeX4A6", img: "" }
+    ]
+  },
+  {
+    day: "8/19 Wed.", title: "檳城自然探索", city: "檳城", lat: 5.4141, lng: 100.3288,
+    items: [
+      { id: "5-1", time: "10:50 - 14:00", name: "升旗山 The Habitat 生態公園", type: "景點", note: "Klook 門票已購買，體驗空中步道", map: "https://maps.app.goo.gl/n3zDSQiEk6sqeCD26", img: "https://images.unsplash.com/photo-1584551246679-0daf3d275d0f?auto=format&fit=crop&w=600&q=80" },
+      { id: "5-2", time: "16:25 - 18:00", name: "葛尼廣場 (Gurney Plaza)", type: "景點", note: "海邊購物中心", map: "", img: "" }
+    ]
+  },
+  {
+    day: "8/20 Thu.", title: "檳城人文漫遊", city: "檳城", lat: 5.4141, lng: 100.3288,
+    items: [
+      { id: "6-1", time: "10:00 - 12:00", name: "張弼士故居 + 娘惹博物館", type: "景點", note: "藍屋與娘惹文化巡禮", map: "", img: "" },
+      { id: "6-2", time: "13:45 - 15:30", name: "喬治市壁畫街 & 小印度", type: "景點", note: "尋找「姐弟共騎」壁畫", map: "", img: "" },
+      { id: "6-3", time: "18:00 - 19:50", name: "光大大廈 68 樓彩虹步道", type: "景點", note: "俯瞰喬治市高空夜景", map: "", img: "" }
+    ]
+  },
+  {
+    day: "8/21 Fri.", title: "檳城海灘渡假", city: "檳城", lat: 5.4667, lng: 100.2452,
+    items: [
+      { id: "7-1", time: "10:30 Check-in", name: "檳城香格里拉金沙酒店", type: "住宿", note: "海灘渡假飯店入住", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=600&q=80" },
+      { id: "7-2", time: "18:00 -", name: "峇都丁宜海灘 (Batu Ferringhi)", type: "景點", note: "觀賞著名落日夕陽", map: "", img: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80" }
+    ]
+  },
+  {
+    day: "8/22 Sat.", title: "檳城 → 臺灣", city: "檳城", lat: 5.2971, lng: 100.2768,
+    items: [
+      { id: "8-1", time: "11:00 - 12:00", name: "前往檳城國際機場", type: "交通", note: "搭乘 Grab 移動前往機場", map: "", img: "" },
+      { id: "8-2", time: "15:10 - 19:55", name: "華航 CI732 (15:10 起飛 → 19:55 抵達)", type: "交通", note: "順利返抵桃園國際機場！", map: "", img: "" }
+    ]
   }
 ];
 
@@ -57,7 +96,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // ☁️ 全團跨手機同步 State (行程 & 花費)
+  // 行程與花費 State
   const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
   const [members, setMembers] = useState(['我', '成員A', '成員B']);
   const [expenses, setExpenses] = useState([
@@ -66,7 +105,7 @@ export default function App() {
     { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
   ]);
 
-  // 📱 個人手機裝置儲存 State (localStorage，不影響其他人)
+  // 個人裝置儲存 State (localStorage)
   const [prepList, setPrepList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_prep');
     return saved ? JSON.parse(saved) : [
@@ -84,29 +123,58 @@ export default function App() {
     ];
   });
 
-  // 自動寫入個人手機儲存區
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // 其他 State
-  const [hourlyWeather] = useState(GENERATE_24H_WEATHER());
+  // 🌤️ 當切換 Day 時，動態從 Open-Meteo API 抓取該城市當天的即時氣象！
+  const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
+
+  useEffect(() => {
+    const currentDay = itinerary[selectedDayIdx];
+    if (!currentDay) return;
+
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentDay.lat}&longitude=${currentDay.lng}&hourly=temperature_2m,precipitation_probability,weathercode&timezone=Asia%2FKuala_Lumpur`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.hourly) {
+          const list = [];
+          for (let i = 0; i < 24; i++) {
+            if (data.hourly.time[i]) {
+              const hourStr = `${i.toString().padStart(2, '0')}:00`;
+              const rain = data.hourly.precipitation_probability[i] || 0;
+              const temp = Math.round(data.hourly.temperature_2m[i]);
+              let icon = "☀️";
+              if (rain > 60) icon = "🌧️";
+              else if (rain > 30) icon = "⛅";
+              else if (i < 6 || i >= 19) icon = "🌙";
+              else if (temp > 32) icon = "🌤️";
+
+              list.push({ time: hourStr, temp: `${temp}°`, rain: `${rain}%`, icon: icon });
+            }
+          }
+          if (list.length === 24) setHourlyWeather(list);
+        }
+      })
+      .catch(() => setHourlyWeather(DEFAULT_HOURLY_WEATHER));
+  }, [selectedDayIdx, itinerary]);
+
+  // 其他功能 State
   const [isEditMode, setIsEditMode] = useState(false);
   const [draggedItemIdx, setDraggedItemIdx] = useState(null);
   const [filterMember, setFilterMember] = useState('全部');
   const [newMemberInput, setNewMemberInput] = useState('');
 
-  // 彈窗 Modal State
-  const [editingSpot, setEditingSpot] = useState(null);
+  const [editingSpot, setEditingSpot] = useState<any>(null);
   const [showAddSpotModal, setShowAddSpotModal] = useState(false);
   const [newSpot, setNewSpot] = useState({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-  const [editingExpense, setEditingExpense] = useState(null);
-  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', splitType: 'ALL', selectedMembers: [], note: '' });
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', splitType: 'ALL', selectedMembers: [] as string[], note: '' });
 
-  // 1. 行程拖移與編輯
-  const handleDragStart = (e, index) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
-  const handleDragOver = (e) => { e.preventDefault(); };
-  const handleDrop = (e, dropTargetIdx) => {
+  // 1. 拖移與編輯景點
+  const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
     e.preventDefault();
     if (!isEditMode || draggedItemIdx === null || draggedItemIdx === dropTargetIdx) return;
     const updated = [...itinerary];
@@ -140,8 +208,8 @@ export default function App() {
     setShowAddSpotModal(false);
   };
 
-  // 2. 團員名稱更改與管理
-  const handleRenameMember = (oldName) => {
+  // 2. 團員管理
+  const handleRenameMember = (oldName: string) => {
     const newName = prompt(`請輸入成員【${oldName}】的新名字：`, oldName);
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
     const trimmed = newName.trim();
@@ -157,7 +225,7 @@ export default function App() {
     setNewMemberInput('');
   };
 
-  const handleDeleteMember = (target) => {
+  const handleDeleteMember = (target: string) => {
     if (members.length <= 1) return alert('請至少留一位成員');
     if (confirm(`確定刪除成員【${target}】嗎？`)) {
       setMembers(members.filter(m => m !== target));
@@ -165,8 +233,8 @@ export default function App() {
     }
   };
 
-  // 3. 花費紀錄編輯與刪除
-  const handleAddExpenseSubmit = (e) => {
+  // 3. 花費管理
+  const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newExpense.item || !newExpense.amount) return;
     const targetSplit = newExpense.splitType === 'ALL' ? [...members] : newExpense.selectedMembers;
@@ -190,7 +258,7 @@ export default function App() {
     setEditingExpense(null);
   };
 
-  const handleDeleteExpense = (id) => {
+  const handleDeleteExpense = (id: number) => {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
@@ -210,7 +278,7 @@ export default function App() {
             isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
           }`}
         >
-          {isEditMode ? '✏️ 編輯模式 (同步中)' : '👁️ 瀏覽模式 (唯讀)'}
+          {isEditMode ? '✏️ 編輯模式 (開啟中)' : '👁️ 瀏覽模式 (唯讀)'}
         </button>
       </header>
 
@@ -247,10 +315,10 @@ export default function App() {
               )}
             </div>
 
-            {/* 24 小時 Apple 氣象 */}
+            {/* 24 小時動態即時氣象區塊 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[11px] font-bold text-slate-300">🌤️ 每小時氣象預報 (00:00 - 23:00)</span>
+                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
                 <span className="text-[10px] text-slate-400">橫向滑動 →</span>
               </div>
               <div className="flex overflow-x-auto space-x-2.5 pb-1 pt-1 scrollbar-none">
@@ -311,13 +379,13 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: 行前準備 (📱 存個人手機裝置) */}
+        {/* TAB 2: 行前準備 (📱 存於個人裝置) */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增準備項目</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 儲存於您的手機</span>
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
@@ -343,13 +411,13 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: 購買清單 (📱 存個人手機裝置) */}
+        {/* TAB 3: 購買清單 (📱 存於個人裝置) */}
         {activeTab === 'shopping' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增想買伴手禮</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 儲存於您的手機</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="p-2 text-xs border rounded-xl" />
@@ -377,7 +445,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: 行程花費 (☁️ 全團實時連線同步) */}
+        {/* TAB 4: 行程花費 */}
         {activeTab === 'expenses' && (
           <div className="space-y-4">
             {isEditMode && (
@@ -392,7 +460,6 @@ export default function App() {
                 <span className="text-[10px] text-gray-400">{isEditMode ? '編輯模式' : '唯讀模式'}</span>
               </div>
 
-              {/* 編輯模式：新增成員 */}
               {isEditMode && (
                 <div className="flex space-x-2">
                   <input type="text" placeholder="輸入新成員名字" value={newMemberInput} onChange={e => setNewMemberInput(e.target.value)} className="flex-1 p-1.5 text-xs border rounded-lg" />
@@ -400,7 +467,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* 成員標籤：含 ✏️ 改名與 ✕ 刪除 */}
               <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
                 <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${filterMember === '全部' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'}`}>
                   全部花費
@@ -426,7 +492,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 花費明細：可編輯、可刪除 */}
             <div className="bg-white p-4 rounded-2xl shadow-sm space-y-3">
               <div className="flex justify-between items-center border-b pb-2">
                 <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>🧾 明細紀錄</h3>
@@ -556,4 +621,10 @@ export default function App() {
 
     </div>
   );
+}
+
+// 🎯 渲染安裝至網頁頁面
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(<App />);
 }
