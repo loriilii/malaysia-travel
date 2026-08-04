@@ -20,7 +20,7 @@ const DEFAULT_HOURLY_WEATHER = [
   { time: "21:00", temp: "27°", rain: "10%", icon: "🌙" }
 ];
 
-// 8 天完整行程資料 (含精準經緯度，用於抓取當日氣象)
+// 8 天完整行程資料
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
@@ -105,7 +105,7 @@ export default function App() {
     { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
   ]);
 
-  // 個人裝置儲存 State (localStorage)
+  // 行前準備 State (新增變數已初始化，防止空白錯誤)
   const [prepList, setPrepList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_prep');
     return saved ? JSON.parse(saved) : [
@@ -114,7 +114,10 @@ export default function App() {
       { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
     ];
   });
+  const [newPrepText, setNewPrepText] = useState('');
+  const [newPrepCat, setNewPrepCat] = useState('個人物品');
 
+  // 購買清單 State (新增變數已初始化，防止空白錯誤)
   const [shoppingList, setShoppingList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_shopping');
     return saved ? JSON.parse(saved) : [
@@ -122,11 +125,13 @@ export default function App() {
       { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
     ];
   });
+  const [newShopName, setNewShopName] = useState('');
+  const [newShopTarget, setNewShopTarget] = useState('');
 
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // 🌤️ 當切換 Day 時，動態從 Open-Meteo API 抓取該城市當天的即時氣象！
+  // 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
 
   useEffect(() => {
@@ -158,9 +163,9 @@ export default function App() {
       .catch(() => setHourlyWeather(DEFAULT_HOURLY_WEATHER));
   }, [selectedDayIdx, itinerary]);
 
-  // 其他功能 State
+  // 其他 UI State
   const [isEditMode, setIsEditMode] = useState(false);
-  const [draggedItemIdx, setDraggedItemIdx] = useState(null);
+  const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
   const [filterMember, setFilterMember] = useState('全部');
   const [newMemberInput, setNewMemberInput] = useState('');
 
@@ -171,7 +176,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', splitType: 'ALL', selectedMembers: [] as string[], note: '' });
 
-  // 1. 拖移與編輯景點
+  // 1. 行程編輯與排序
   const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
   const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
@@ -315,7 +320,7 @@ export default function App() {
               )}
             </div>
 
-            {/* 24 小時動態即時氣象區塊 */}
+            {/* 24 小時動態即時氣象預報 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
                 <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
@@ -333,7 +338,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 行程卡片 */}
+            {/* 行程卡片 (移除鬧鐘 icon，換成低調 Google Map 導航按鈕) */}
             <div className="space-y-3 pt-1">
               {itinerary[selectedDayIdx].items.map((spot, index) => (
                 <div
@@ -365,11 +370,20 @@ export default function App() {
                     </div>
 
                     <h3 className="font-bold text-sm mt-2" style={{ color: THEME.primary }}>{spot.name}</h3>
-                    <div className="text-xs text-gray-400 font-mono mt-0.5">⏰ {spot.time}</div>
+                    {/* 已移除鬧鐘 Icon ⏰ */}
+                    <div className="text-xs text-gray-400 font-mono mt-0.5">{spot.time}</div>
+                    
                     {spot.note && <p className="text-xs text-gray-600 mt-2 bg-amber-50/60 p-2 rounded-lg border border-amber-100">{spot.note}</p>}
+                    
+                    {/* 質感低調 Google Map 導航按鈕 */}
                     {spot.map && (
-                      <a href={spot.map} target="_blank" className="inline-block mt-3 text-xs font-bold underline" style={{ color: THEME.accent }}>
-                        📍 開啟 Google Maps 導航
+                      <a
+                        href={spot.map}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center text-xs mt-3 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 font-medium transition"
+                      >
+                        Google Map 導航 ↗
                       </a>
                     )}
                   </div>
@@ -379,7 +393,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: 行前準備 (📱 存於個人裝置) */}
+        {/* TAB 2: 行行前準備 (📱 存個人手機，已修復空白問題) */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
@@ -389,6 +403,12 @@ export default function App() {
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
+                <select value={newPrepCat} onChange={e => setNewPrepCat(e.target.value)} className="p-2 text-xs border rounded-xl bg-white">
+                  <option value="個人物品">個人物品</option>
+                  <option value="衣物配件">衣物配件</option>
+                  <option value="電子支付">電子支付</option>
+                  <option value="待辦事項">待辦事項</option>
+                </select>
                 <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow" style={{ backgroundColor: THEME.accent }}>
                   新增
                 </button>
@@ -411,7 +431,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: 購買清單 (📱 存於個人裝置) */}
+        {/* TAB 3: 購買清單 (📱 存個人手機，已修復空白問題) */}
         {activeTab === 'shopping' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
@@ -528,7 +548,7 @@ export default function App() {
 
       </main>
 
-      {/* 編輯景點 Modal */}
+      {/* 編輯景點 Modal (包含 Google Map 網址欄位) */}
       {editingSpot && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -537,15 +557,24 @@ export default function App() {
               <button onClick={() => setEditingSpot(null)} className="text-gray-400 font-bold">✕</button>
             </div>
             <input type="text" value={editingSpot.name} onChange={e => setEditingSpot({...editingSpot, name: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="景點名稱" />
-            <input type="text" value={editingSpot.time} onChange={e => setEditingSpot({...editingSpot, time: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="時間" />
+            <div className="grid grid-cols-2 gap-2">
+              <input type="text" value={editingSpot.time} onChange={e => setEditingSpot({...editingSpot, time: e.target.value})} className="p-2 text-xs border rounded-lg" placeholder="時間" />
+              <select value={editingSpot.type} onChange={e => setEditingSpot({...editingSpot, type: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
+                <option value="景點">景點</option>
+                <option value="飲食">飲食</option>
+                <option value="交通">交通</option>
+                <option value="住宿">住宿</option>
+              </select>
+            </div>
             <textarea value={editingSpot.note} onChange={e => setEditingSpot({...editingSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" placeholder="備註說明" />
+            <input type="text" value={editingSpot.map} onChange={e => setEditingSpot({...editingSpot, map: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="Google Map 網址" />
             <input type="text" value={editingSpot.img} onChange={e => setEditingSpot({...editingSpot, img: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="圖片網址 URL" />
             <button onClick={handleSaveEditSpot} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
         </div>
       )}
 
-      {/* 新增景點 Modal */}
+      {/* 新增景點 Modal (包含完整的 6 大欄位) */}
       {showAddSpotModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -553,9 +582,19 @@ export default function App() {
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>➕ 動態新增當天行程</h3>
               <button onClick={() => setShowAddSpotModal(false)} className="text-gray-400 font-bold">✕</button>
             </div>
-            <input type="text" placeholder="行程名稱" value={newSpot.name} onChange={e => setNewSpot({...newSpot, name: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
-            <input type="text" placeholder="時間 (如 15:30)" value={newSpot.time} onChange={e => setNewSpot({...newSpot, time: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
+            <input type="text" placeholder="行程/景點名稱" value={newSpot.name} onChange={e => setNewSpot({...newSpot, name: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
+            <div className="grid grid-cols-2 gap-2">
+              <input type="text" placeholder="時間 (如 15:30)" value={newSpot.time} onChange={e => setNewSpot({...newSpot, time: e.target.value})} className="p-2 text-xs border rounded-lg" />
+              <select value={newSpot.type} onChange={e => setNewSpot({...newSpot, type: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
+                <option value="景點">景點</option>
+                <option value="飲食">飲食</option>
+                <option value="交通">交通</option>
+                <option value="住宿">住宿</option>
+              </select>
+            </div>
             <textarea placeholder="說明/備註" value={newSpot.note} onChange={e => setNewSpot({...newSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" />
+            <input type="text" placeholder="Google Map 網址 (選填)" value={newSpot.map} onChange={e => setNewSpot({...newSpot, map: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
+            <input type="text" placeholder="圖片網址 URL (選填)" value={newSpot.img} onChange={e => setNewSpot({...newSpot, img: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <button onClick={handleAddSpotSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>確認新增</button>
           </div>
         </div>
@@ -623,7 +662,7 @@ export default function App() {
   );
 }
 
-// 🎯 渲染安裝至網頁頁面
+// 渲染安裝至頁面
 const rootElement = document.getElementById('root');
 if (rootElement) {
   ReactDOM.createRoot(rootElement).render(<App />);
