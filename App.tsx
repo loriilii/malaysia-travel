@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom/client';
 
 const THEME = {
   primary: '#183451',
@@ -1125,4 +1126,9 @@ export default function App() {
       </nav>
     </div>
   );
+}
+
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(<App />);
 }
