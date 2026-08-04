@@ -8,9 +8,8 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// 全球公用雲端資料庫金鑰 (用於全團手機同步)
-const CLOUD_SYNC_URL = "https://keyvalue.imsky.org";
-const TRIP_SYNC_KEY = "malaysia_trip_20260815_master_persistent_v1";
+// ☁️ 全球雲端實時同步端點 (JSONBlob 開放式連線)
+const JSON_BLOB_API = "https://jsonblob.com/api/jsonBlob/1272000000000000000";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -100,7 +99,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // ☁️ 全團跨手機同步 State (行程, 花費, 成員)
+  // ☁️ 雲端跨手機連線同步 State (行程, 花費, 成員)
   const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
   const [members, setMembers] = useState(['我', '成員A', '成員B']);
   const [expenses, setExpenses] = useState([
@@ -137,29 +136,27 @@ export default function App() {
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // ☁️ 全球雲端實時同步機制 (一開頁面自動下載全團最新行程與花費)
+  // ☁️ 全球雲端同步 (JSONBlob REST API，跨手機 100% 通暢)
   const pullCloudData = async () => {
     try {
       setIsSyncing(true);
-      const res = await fetch(`${CLOUD_SYNC_URL}/get/${TRIP_SYNC_KEY}`);
+      const res = await fetch(JSON_BLOB_API, {
+        headers: { 'Accept': 'application/json' }
+      });
       if (res.ok) {
-        const text = await res.text();
-        if (text && text.trim().startsWith('{')) {
-          const cloudData = JSON.parse(text);
-          if (cloudData.itinerary) setItinerary(cloudData.itinerary);
-          if (cloudData.expenses) setExpenses(cloudData.expenses);
-          if (cloudData.members) setMembers(cloudData.members);
-          setLastSyncTime(new Date().toLocaleTimeString());
-        }
+        const cloudData = await res.json();
+        if (cloudData.itinerary) setItinerary(cloudData.itinerary);
+        if (cloudData.expenses) setExpenses(cloudData.expenses);
+        if (cloudData.members) setMembers(cloudData.members);
+        setLastSyncTime(new Date().toLocaleTimeString());
       }
     } catch (e) {
-      console.log('Sync fetch fallback');
+      console.log('Cloud sync fetch error');
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // 上傳更新至雲端
   const pushCloudData = async (newItinerary: any, newExpenses: any, newMembers: any) => {
     try {
       setIsSyncing(true);
@@ -169,24 +166,27 @@ export default function App() {
         members: newMembers || members,
         updatedAt: Date.now()
       };
-      await fetch(`${CLOUD_SYNC_URL}/set/${TRIP_SYNC_KEY}`, {
-        method: 'POST',
+      await fetch(JSON_BLOB_API, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
       setLastSyncTime(new Date().toLocaleTimeString());
     } catch (e) {
-      console.log('Sync push error');
+      console.log('Cloud sync push error');
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // 頁面載入時自動連線抓取最新全團資料
   useEffect(() => {
     pullCloudData();
   }, []);
 
-  // 🌤️ 動態即時氣象 (按城市經緯度)
+  // 🌤️ 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
 
   useEffect(() => {
@@ -218,7 +218,7 @@ export default function App() {
       .catch(() => setHourlyWeather(DEFAULT_HOURLY_WEATHER));
   }, [selectedDayIdx, itinerary]);
 
-  // 其他 UI State
+  // UI State
   const [isEditMode, setIsEditMode] = useState(false);
   const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
   const [filterMember, setFilterMember] = useState('全部');
@@ -229,9 +229,9 @@ export default function App() {
   const [newSpot, setNewSpot] = useState({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<any>(null);
-  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', splitType: 'ALL', selectedMembers: [] as string[], note: '' });
+  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 1. 行程編輯與排序 (自動同步至雲端)
+  // 1. 行程拖移與編輯 (同步雲端)
   const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
   const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
@@ -271,7 +271,7 @@ export default function App() {
     setShowAddSpotModal(false);
   };
 
-  // 2. 團員管理 (同步至雲端)
+  // 2. 團員管理
   const handleRenameMember = (oldName: string) => {
     const newName = prompt(`請輸入成員【${oldName}】的新名字：`, oldName);
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
@@ -303,29 +303,40 @@ export default function App() {
     }
   };
 
-  // 3. 花費管理 (同步至雲端)
+  // 3. 花費管理 (含預設全選的成員分攤欄位)
+  const handleOpenAddExpense = () => {
+    setNewExpense({
+      item: '',
+      amount: '',
+      currency: 'MYR',
+      selectedMembers: [...members], // 🎯 預設全選所有成員！
+      note: ''
+    });
+    setShowAddExpenseModal(true);
+  };
+
   const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newExpense.item || !newExpense.amount) return;
-    const targetSplit = newExpense.splitType === 'ALL' ? [...members] : newExpense.selectedMembers;
+    if (newExpense.selectedMembers.length === 0) return alert('請至少勾選一位分攤成員！');
+
     const newExpenses = [...expenses, {
       id: Date.now(),
       date: itinerary[selectedDayIdx].day.split(' ')[0],
       item: newExpense.item,
       amount: parseFloat(newExpense.amount),
       currency: newExpense.currency,
-      splitType: newExpense.splitType,
-      splitFor: targetSplit,
+      splitFor: newExpense.selectedMembers,
       note: newExpense.note
     }];
     setExpenses(newExpenses);
     pushCloudData(itinerary, newExpenses, members);
-    setNewExpense({ item: '', amount: '', currency: 'MYR', splitType: 'ALL', selectedMembers: [], note: '' });
     setShowAddExpenseModal(false);
   };
 
   const handleSaveEditExpense = () => {
     if (!editingExpense) return;
+    if (editingExpense.splitFor.length === 0) return alert('請至少勾選一位分攤成員！');
     const newExpenses = expenses.map(e => e.id === editingExpense.id ? editingExpense : e);
     setExpenses(newExpenses);
     pushCloudData(itinerary, newExpenses, members);
@@ -346,7 +357,7 @@ export default function App() {
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
-            <button onClick={pullCloudData} className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full hover:bg-white/30 text-amber-200">
+            <button onClick={pullCloudData} className="text-[10px] bg-white/20 px-2.5 py-0.5 rounded-full hover:bg-white/30 text-amber-200 flex items-center font-medium">
               {isSyncing ? '🔄 同步中...' : `☁️ 連線同步 ${lastSyncTime}`}
             </button>
           </div>
@@ -359,7 +370,7 @@ export default function App() {
             isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
           }`}
         >
-          {isEditMode ? '✏️ 編輯模式 (連線)' : '👁️ 瀏覽模式 (唯讀)'}
+          {isEditMode ? '✏️ 編輯模式 (開啟中)' : '👁️ 瀏覽模式 (唯讀)'}
         </button>
       </header>
 
@@ -396,7 +407,7 @@ export default function App() {
               )}
             </div>
 
-            {/* 24 小時即時動態氣象 */}
+            {/* 24 小時動態氣象 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
                 <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
@@ -467,7 +478,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: 行行前準備 (📱 存個人手機) */}
+        {/* TAB 2: 行前準備 (📱 存個人手機) */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
@@ -477,12 +488,6 @@ export default function App() {
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
-                <select value={newPrepCat} onChange={e => setNewPrepCat(e.target.value)} className="p-2 text-xs border rounded-xl bg-white">
-                  <option value="個人物品">個人物品</option>
-                  <option value="衣物配件">衣物配件</option>
-                  <option value="電子支付">電子支付</option>
-                  <option value="待辦事項">待辦事項</option>
-                </select>
                 <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow" style={{ backgroundColor: THEME.accent }}>
                   新增
                 </button>
@@ -539,11 +544,11 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: 行程花費 (☁️ 雲端實時連線同步) */}
+        {/* TAB 4: 行程花費 */}
         {activeTab === 'expenses' && (
           <div className="space-y-4">
             {isEditMode && (
-              <button onClick={() => { setNewExpense({...newExpense, selectedMembers: [...members]}); setShowAddExpenseModal(true); }} className="w-full py-3 rounded-2xl text-white font-bold text-sm shadow-md flex items-center justify-center space-x-1" style={{ backgroundColor: THEME.accent }}>
+              <button onClick={handleOpenAddExpense} className="w-full py-3 rounded-2xl text-white font-bold text-sm shadow-md flex items-center justify-center space-x-1" style={{ backgroundColor: THEME.accent }}>
                 <span>➕ 新增花費紀錄</span>
               </button>
             )}
@@ -674,7 +679,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 新增花費 Modal */}
+      {/* 🎯 新增花費 Modal (恢復成員勾選欄位，且預設全選！) */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -682,7 +687,7 @@ export default function App() {
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>➕ 記錄新花費</h3>
               <button onClick={() => setShowAddExpenseModal(false)} className="text-gray-400 font-bold">✕</button>
             </div>
-            <input type="text" placeholder="花費項目" value={newExpense.item} onChange={e => setNewExpense({...newExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
+            <input type="text" placeholder="花費項目 (例: 亞羅街晚餐)" value={newExpense.item} onChange={e => setNewExpense({...newExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <div className="grid grid-cols-2 gap-2">
               <input type="number" placeholder="金額" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} className="p-2 text-xs border rounded-lg" />
               <select value={newExpense.currency} onChange={e => setNewExpense({...newExpense, currency: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
@@ -690,12 +695,38 @@ export default function App() {
                 <option value="TWD">台幣 (TWD)</option>
               </select>
             </div>
+
+            {/* 🎯 恢復的成員勾選欄位 (預設全選) */}
+            <div>
+              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？(預設全選，可點擊勾選)</label>
+              <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
+                {members.map(m => (
+                  <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newExpense.selectedMembers.includes(m)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setNewExpense({ ...newExpense, selectedMembers: [...newExpense.selectedMembers, m] });
+                        } else {
+                          setNewExpense({ ...newExpense, selectedMembers: newExpense.selectedMembers.filter(x => x !== m) });
+                        }
+                      }}
+                      className="rounded text-amber-800 focus:ring-amber-800"
+                    />
+                    <span className="font-medium text-slate-800">{m}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <input type="text" placeholder="備註說明 (選填)" value={newExpense.note} onChange={e => setNewExpense({...newExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <button onClick={handleAddExpenseSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存紀錄</button>
           </div>
         </div>
       )}
 
-      {/* 編輯花費 Modal */}
+      {/* 🎯 編輯花費 Modal (含成員勾選) */}
       {editingExpense && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -704,7 +735,38 @@ export default function App() {
               <button onClick={() => setEditingExpense(null)} className="text-gray-400 font-bold">✕</button>
             </div>
             <input type="text" value={editingExpense.item} onChange={e => setEditingExpense({...editingExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="項目" />
-            <input type="number" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: parseFloat(e.target.value) || 0})} className="w-full p-2 text-xs border rounded-lg" placeholder="金額" />
+            <div className="grid grid-cols-2 gap-2">
+              <input type="number" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: parseFloat(e.target.value) || 0})} className="p-2 text-xs border rounded-lg" placeholder="金額" />
+              <select value={editingExpense.currency} onChange={e => setEditingExpense({...editingExpense, currency: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
+                <option value="MYR">馬幣 (MYR)</option>
+                <option value="TWD">台幣 (TWD)</option>
+              </select>
+            </div>
+
+            {/* 成員分攤勾選 */}
+            <div>
+              <label className="text-[10px] font-bold text-gray-500">修改此費用包含的成員：</label>
+              <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
+                {members.map(m => (
+                  <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingExpense.splitFor.includes(m)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setEditingExpense({ ...editingExpense, splitFor: [...editingExpense.splitFor, m] });
+                        } else {
+                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter((x: string) => x !== m) });
+                        }
+                      }}
+                      className="rounded text-amber-800 focus:ring-amber-800"
+                    />
+                    <span className="font-medium text-slate-800">{m}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <input type="text" value={editingExpense.note} onChange={e => setEditingExpense({...editingExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="備註" />
             <button onClick={handleSaveEditExpense} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
@@ -736,7 +798,7 @@ export default function App() {
   );
 }
 
-// 渲染安裝至頁面
+// 渲染安裝
 const rootElement = document.getElementById('root');
 if (rootElement) {
   ReactDOM.createRoot(rootElement).render(<App />);
