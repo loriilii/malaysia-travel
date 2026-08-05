@@ -8,9 +8,16 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// ☁️ 全球 100% 免驗證開放直連資料庫通道 (跨手機 100% 互通)
-const NPOINT_API_URL = "https://api.npoint.io/88ef3914a1a6f0227183";
-const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_FINAL_STORAGE_V6";
+// ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
+const FIXED_FIREBASE_URL = "https://trip-app-malaysia-default-rtdb.firebaseio.com/master_trip.json";
+const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
+
+// 自動輪詢間隔 (毫秒) - 讓多裝置間更接近「即時」同步
+const AUTO_POLL_INTERVAL_MS = 12000;
+
+// 匯率 API：MYR 為基準幣別，免金鑰、支援 TWD
+const EXCHANGE_RATE_URL = "https://open.er-api.com/v6/latest/MYR";
+const RATE_CACHE_KEY = "MY_MALAYSIA_TRIP_RATE_CACHE_V1";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -100,7 +107,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 1. React 本地狀態
+  // 1. React 狀態（從 LocalStorage 快存啟動，絕不白屏）
   const [itinerary, setItinerary] = useState(() => {
     const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
     if (saved) {
@@ -137,6 +144,8 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
+  // 記錄本地資料最後一次變更的時間戳，用來避免「輪詢拉取」把還沒推送成功的最新編輯蓋掉
+  const [localUpdatedAt, setLocalUpdatedAt] = useState(0);
 
   // 📱 個人手機獨立清單 (localStorage)
   const [prepList, setPrepList] = useState(() => {
@@ -171,31 +180,42 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // ☁️ 100% 跨手機真同步拉取 (GET)
+  // 深複製小工具：避免物件參照被意外共用、造成「明明存了卻沒真的變」的怪異 bug
+  const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj));
+
+  // ☁️ 100% 全球同一通道 Firebase 雲端讀取
   const pullFromCloud = async (isManualRetry = false) => {
-    setSyncStatus('syncing');
+    if (isManualRetry) setSyncStatus('syncing');
     try {
-      const res = await fetch(NPOINT_API_URL, { cache: 'no-cache' });
+      const res = await fetch(`${FIXED_FIREBASE_URL}?_ts=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const cloudObj = await res.json();
         if (cloudObj && cloudObj.itinerary) {
-          setItinerary(cloudObj.itinerary);
-          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
-          if (cloudObj.members) setMembers(cloudObj.members);
-
-          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
+          // 如果本地才剛剛編輯過、還沒確定推送成功，避免輪詢把畫面蓋回舊版
+          const cloudUpdatedAt = cloudObj.updatedAt || 0;
+          if (cloudUpdatedAt >= localUpdatedAt) {
+            setItinerary(cloudObj.itinerary);
+            if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+            if (cloudObj.members) setMembers(cloudObj.members);
+            localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
+          }
           setSyncStatus('success');
           const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           setLastSyncTime(timeStr);
 
           if (isManualRetry) {
-            alert(`🟢 跨手機雲端連線 100% 成功！\n\n- 通道狀態：200 OK (npoint API)\n- 行程天數：${cloudObj.itinerary.length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 同步時間：${timeStr}\n\n這代表所有手機開網頁都會看到這份資料！`);
+            alert(`🟢 全球雲端連線成功！\n\n- 通道：Google Firebase 固定端點\n- 最新同步時間：${timeStr}\n- 雲端行程天數：${cloudObj.itinerary.length} 天\n- 雲端花費筆數：${(cloudObj.expenses || []).length} 筆\n\n其他同行手機只要整理網頁，即可看到此最新數據！`);
           }
           return true;
-        } else {
-          // 如果雲端空了，自動寫入預設行程
+        } else if (cloudObj === null) {
+          // 如果雲端尚未有資料，把本地預設行程推上去初始化
           await pushToCloud(itinerary, expenses, members);
           return true;
+        }
+      } else {
+        console.error('Pull cloud non-ok status:', res.status);
+        if (isManualRetry) {
+          alert(`🔴 雲端連線失敗 (HTTP ${res.status})。\n\n最常見原因：Firebase Realtime Database 的「安全性規則 (Rules)」目前不允許公開讀寫。\n請至 Firebase 主控台 → Realtime Database → Rules，確認設定為：\n{"rules": {".read": true, ".write": true}}\n\n（測試模式的規則預設 30 天後就會失效，需要手動改成上面這樣才能讓所有裝置永久互通）`);
         }
       }
     } catch (e) {
@@ -204,35 +224,38 @@ export default function App() {
 
     setSyncStatus('error');
     if (isManualRetry) {
-      alert('🔴 網路連線異常，已自動載入手機本地快存。');
+      alert('🔴 雲端連線失敗，已自動啟用手機本地快存。\n💡 請檢查手機網路，連線恢復時將自動同步。');
     }
     return false;
   };
 
-  // ☁️ 100% 跨手機真同步推送 (POST)
+  // ☁️ 100% 全球同一通道 Firebase 雲端寫入 (PUT)
   const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
-    const targetItinerary = newItinerary || itinerary;
-    const targetExpenses = newExpenses || expenses;
-    const targetMembers = newMembers || members;
+    const targetItinerary = newItinerary !== undefined ? newItinerary : itinerary;
+    const targetExpenses = newExpenses !== undefined ? newExpenses : expenses;
+    const targetMembers = newMembers !== undefined ? newMembers : members;
 
-    // 1. 立即更新 React 本地 UI
-    if (newItinerary) setItinerary(newItinerary);
-    if (newExpenses) setExpenses(newExpenses);
-    if (newMembers) setMembers(newMembers);
+    const stamp = Date.now();
+    setLocalUpdatedAt(stamp);
+
+    // 1. 先更新本地 State 與備份 (立即反應在畫面上)
+    if (newItinerary !== undefined) setItinerary(targetItinerary);
+    if (newExpenses !== undefined) setExpenses(targetExpenses);
+    if (newMembers !== undefined) setMembers(targetMembers);
 
     const payload = {
       itinerary: targetItinerary,
       expenses: targetExpenses,
       members: targetMembers,
-      updatedAt: Date.now()
+      updatedAt: stamp
     };
     localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
 
-    // 2. 推送到公共雲端點
+    // 2. 直連推送到全團唯一的 Firebase 雲端點
     setSyncStatus('syncing');
     try {
-      const res = await fetch(NPOINT_API_URL, {
-        method: 'POST',
+      const res = await fetch(FIXED_FIREBASE_URL, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -241,17 +264,21 @@ export default function App() {
         setSyncStatus('success');
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         setLastSyncTime(timeStr);
-        showToast('☁️ 已即時同步給所有手機！');
+        showToast('☁️ 已即時同步至全團共享雲端！');
         return;
+      } else {
+        console.error('Push cloud non-ok status:', res.status);
+        showToast(`⚠️ 雲端寫入失敗 (HTTP ${res.status})，請確認 Firebase 規則`);
       }
     } catch (e) {
       console.error('Push cloud error:', e);
+      showToast('⚠️ 雲端寫入失敗，請檢查網路連線');
     }
 
     setSyncStatus('error');
   };
 
-  // 網頁開啟時 + 切換視窗時自動抓取最新雲端資料
+  // 網頁開啟時 + 切換視窗時 + 每隔一段時間自動抓取全團最新雲端資料
   useEffect(() => {
     pullFromCloud(false);
 
@@ -259,7 +286,17 @@ export default function App() {
       if (document.visibilityState === 'visible') pullFromCloud(false);
     };
     window.addEventListener('visibilitychange', handleVisibility);
-    return () => window.removeEventListener('visibilitychange', handleVisibility);
+
+    // 定時輪詢，讓其他裝置不用手動切換視窗也能較快看到更新
+    const pollId = setInterval(() => {
+      if (document.visibilityState === 'visible') pullFromCloud(false);
+    }, AUTO_POLL_INTERVAL_MS);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(pollId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 🌤️ 動態即時氣象
@@ -294,6 +331,79 @@ export default function App() {
       .catch(() => setHourlyWeather(DEFAULT_HOURLY_WEATHER));
   }, [selectedDayIdx, itinerary]);
 
+  // 💱 馬幣 ↔ 台幣 即時匯率換算工具
+  const [rateInfo, setRateInfo] = useState<{ rate: number | null; updatedAt: string; error: boolean }>(() => {
+    const saved = localStorage.getItem(RATE_CACHE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return { rate: parsed.rate || null, updatedAt: parsed.updatedAt || '', error: false };
+      } catch (e) {}
+    }
+    return { rate: null, updatedAt: '', error: false };
+  });
+  const [rateLoading, setRateLoading] = useState(false);
+  const [amountMYR, setAmountMYR] = useState('100');
+  const [amountTWD, setAmountTWD] = useState('');
+
+  const fetchExchangeRate = async (isManual = false) => {
+    setRateLoading(true);
+    try {
+      const res = await fetch(EXCHANGE_RATE_URL);
+      const data = await res.json();
+      const twdRate = data?.rates?.TWD;
+      if (twdRate) {
+        const timeStr = new Date().toLocaleString('zh-TW', { hour12: false });
+        const info = { rate: twdRate, updatedAt: timeStr, error: false };
+        setRateInfo(info);
+        localStorage.setItem(RATE_CACHE_KEY, JSON.stringify(info));
+      } else {
+        setRateInfo(prev => ({ ...prev, error: true }));
+        if (isManual) alert('🔴 匯率資料格式異常，請稍後再試');
+      }
+    } catch (e) {
+      console.error('Exchange rate fetch error:', e);
+      setRateInfo(prev => ({ ...prev, error: true }));
+      if (isManual) alert('🔴 匯率查詢失敗，請檢查網路連線');
+    }
+    setRateLoading(false);
+  };
+
+  useEffect(() => {
+    fetchExchangeRate(false);
+    const rateInterval = setInterval(() => fetchExchangeRate(false), 30 * 60 * 1000); // 每 30 分鐘自動更新一次
+    return () => clearInterval(rateInterval);
+  }, []);
+
+  useEffect(() => {
+    if (!rateInfo.rate) return;
+    const myrNum = parseFloat(amountMYR);
+    if (!isNaN(myrNum)) {
+      setAmountTWD((myrNum * rateInfo.rate).toFixed(2));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rateInfo.rate]);
+
+  const handleMYRChange = (val: string) => {
+    setAmountMYR(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && rateInfo.rate) {
+      setAmountTWD((num * rateInfo.rate).toFixed(2));
+    } else {
+      setAmountTWD('');
+    }
+  };
+
+  const handleTWDChange = (val: string) => {
+    setAmountTWD(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && rateInfo.rate) {
+      setAmountMYR((num / rateInfo.rate).toFixed(2));
+    } else {
+      setAmountMYR('');
+    }
+  };
+
   // UI State
   const [isEditMode, setIsEditMode] = useState(false);
   const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
@@ -312,11 +422,10 @@ export default function App() {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
 
-    const updatedItinerary = [...itinerary];
-    const currentItems = [...updatedItinerary[selectedDayIdx].items];
+    const updatedItinerary = deepClone(itinerary);
+    const currentItems = updatedItinerary[selectedDayIdx].items;
     const [movedItem] = currentItems.splice(currentIndex, 1);
     currentItems.splice(targetIndex, 0, movedItem);
-    updatedItinerary[selectedDayIdx].items = currentItems;
 
     pushToCloud(updatedItinerary, expenses, members);
   };
@@ -326,11 +435,10 @@ export default function App() {
   const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
     e.preventDefault();
     if (!isEditMode || draggedItemIdx === null || draggedItemIdx === dropTargetIdx) return;
-    const updatedItinerary = [...itinerary];
-    const currentItems = [...updatedItinerary[selectedDayIdx].items];
+    const updatedItinerary = deepClone(itinerary);
+    const currentItems = updatedItinerary[selectedDayIdx].items;
     const [movedItem] = currentItems.splice(draggedItemIdx, 1);
     currentItems.splice(dropTargetIdx, 0, movedItem);
-    updatedItinerary[selectedDayIdx].items = currentItems;
 
     pushToCloud(updatedItinerary, expenses, members);
     setDraggedItemIdx(null);
@@ -338,19 +446,18 @@ export default function App() {
 
   const handleDeleteSpot = (spotId: string) => {
     if (!confirm('確定刪除此行程嗎？')) return;
-    const updatedItinerary = [...itinerary];
-    updatedItinerary[selectedDayIdx].items = updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId);
+    const updatedItinerary = deepClone(itinerary);
+    updatedItinerary[selectedDayIdx].items = updatedItinerary[selectedDayIdx].items.filter((item: any) => item.id !== spotId);
     pushToCloud(updatedItinerary, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
     if (!editingSpot) return;
-    const updatedItinerary = [...itinerary];
-    const currentItems = [...updatedItinerary[selectedDayIdx].items];
-    const idx = currentItems.findIndex(item => item.id === editingSpot.id);
+    const updatedItinerary = deepClone(itinerary);
+    const currentItems = updatedItinerary[selectedDayIdx].items;
+    const idx = currentItems.findIndex((item: any) => item.id === editingSpot.id);
     if (idx !== -1) {
       currentItems[idx] = { ...editingSpot };
-      updatedItinerary[selectedDayIdx].items = currentItems;
       pushToCloud(updatedItinerary, expenses, members);
     }
     setEditingSpot(null);
@@ -358,7 +465,7 @@ export default function App() {
 
   const handleAddSpotSubmit = () => {
     if (!newSpot.name) return;
-    const updatedItinerary = [...itinerary];
+    const updatedItinerary = deepClone(itinerary);
     updatedItinerary[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
     pushToCloud(updatedItinerary, expenses, members);
     setNewSpot({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
@@ -371,7 +478,7 @@ export default function App() {
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
     const trimmed = newName.trim();
     const newMembers = members.map(m => m === oldName ? trimmed : m);
-    const newExpenses = expenses.map(e => ({ ...e, splitFor: e.splitFor.map(s => s === oldName ? trimmed : s) }));
+    const newExpenses = expenses.map(e => ({ ...e, splitFor: e.splitFor.map((s: string) => s === oldName ? trimmed : s) }));
     pushToCloud(itinerary, newExpenses, newMembers);
     if (filterMember === oldName) setFilterMember(trimmed);
   };
@@ -480,7 +587,7 @@ export default function App() {
             <button
               onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊診斷與拉取最新資料"
+              title="點擊強制拉取全團最新雲端資料"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
               <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `全團同步 ${lastSyncTime}` : '點此重試'}</span>
@@ -490,7 +597,7 @@ export default function App() {
               ⚙️
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (npoint 跨手機連線)</p>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (Firebase 直連中心)</p>
         </div>
 
         <button
@@ -502,6 +609,13 @@ export default function App() {
           {isEditMode ? '✏️ 編輯模式' : '👁️ 唯讀模式'}
         </button>
       </header>
+
+      {/* 雲端連線異常時的明顯提示條 */}
+      {syncStatus === 'error' && (
+        <div className="bg-red-600 text-white text-[11px] px-4 py-2 text-center leading-relaxed">
+          🔴 雲端連線異常，編輯可能無法同步給其他人！請點擊上方「點此重試」，若持續失敗請檢查 Firebase Rules 設定。
+        </div>
+      )}
 
       <main className="p-4 space-y-4">
 
@@ -782,6 +896,83 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB 5: 匯率換算 */}
+        {activeTab === 'rate' && (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4 rounded-2xl shadow-md border border-slate-700">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-bold">💱 馬幣 → 台幣 即時匯率</span>
+                <button
+                  onClick={() => fetchExchangeRate(true)}
+                  className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full flex items-center space-x-1 border border-white/20 transition cursor-pointer"
+                >
+                  {rateLoading ? '🔄 更新中...' : '🔄 手動更新'}
+                </button>
+              </div>
+              <div className="mt-3 text-center">
+                {rateInfo.rate ? (
+                  <>
+                    <div className="text-3xl font-black">1 MYR ≈ {rateInfo.rate.toFixed(4)} TWD</div>
+                    <div className="text-[10px] text-slate-400 mt-1">最後更新：{rateInfo.updatedAt}</div>
+                  </>
+                ) : (
+                  <div className="text-sm text-slate-300 py-2">{rateLoading ? '匯率讀取中...' : '尚無匯率資料'}</div>
+                )}
+                {rateInfo.error && <div className="text-[10px] text-red-300 mt-1">⚠️ 上次更新失敗，目前顯示為快取匯率</div>}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10 space-y-3">
+              <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>🧮 雙向快速換算</h3>
+
+              <div>
+                <label className="text-[10px] font-bold text-gray-500">馬幣 MYR (RM)</label>
+                <input
+                  type="number"
+                  value={amountMYR}
+                  onChange={e => handleMYRChange(e.target.value)}
+                  placeholder="輸入馬幣金額"
+                  className="w-full p-3 mt-1 text-lg font-bold border rounded-xl focus:outline-none focus:ring-2"
+                  style={{ borderColor: THEME.sand }}
+                />
+              </div>
+
+              <div className="flex justify-center text-gray-300">⇅</div>
+
+              <div>
+                <label className="text-[10px] font-bold text-gray-500">台幣 TWD (NT$)</label>
+                <input
+                  type="number"
+                  value={amountTWD}
+                  onChange={e => handleTWDChange(e.target.value)}
+                  placeholder="輸入台幣金額"
+                  className="w-full p-3 mt-1 text-lg font-bold border rounded-xl focus:outline-none focus:ring-2"
+                  style={{ borderColor: THEME.sand }}
+                />
+              </div>
+
+              <p className="text-[10px] text-gray-400 text-center pt-1">
+                匯率資料來源：open.er-api.com（每 30 分鐘自動更新一次，也可手動點擊上方按鈕即時刷新）
+              </p>
+            </div>
+
+            {/* 快速對照表 */}
+            {rateInfo.rate && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10">
+                <h3 className="font-bold text-sm mb-2" style={{ color: THEME.primary }}>📋 常用金額對照</h3>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[10, 50, 100, 200, 500, 1000].map(myr => (
+                    <div key={myr} className="flex justify-between p-2 bg-amber-50/60 rounded-lg border border-amber-100">
+                      <span className="text-gray-500">RM {myr}</span>
+                      <span className="font-bold text-amber-900">NT$ {(myr * rateInfo.rate!).toFixed(0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
       </main>
 
       {/* 實體備份 Modal */}
@@ -959,17 +1150,18 @@ export default function App() {
 
       {/* 底部 Tab */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40">
-        <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[11px]">
+        <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[10px]">
           {[
             { id: 'itinerary', name: '行程總覽' },
             { id: 'prep', name: '行前準備' },
             { id: 'shopping', name: '購買清單' },
-            { id: 'expenses', name: '行程花費' }
+            { id: 'expenses', name: '行程花費' },
+            { id: 'rate', name: '匯率換算' }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center px-3 py-1 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
+              className={`flex flex-col items-center px-2 py-1 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
               style={{ color: activeTab === tab.id ? THEME.accent : THEME.primary }}
             >
               <span>{tab.name}</span>
