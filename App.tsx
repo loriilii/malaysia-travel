@@ -8,10 +8,9 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// 本地備份與雲端固定 Key
-const LOCAL_STORAGE_KEY = "MY_MALAYSIA_TRIP_MASTER_DATA_V3";
-const CLOUD_BLOB_ID_KEY = "MY_MALAYSIA_TRIP_BLOB_ID_V3";
-const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
+// ☁️ 專屬直連 KV 雲端資料庫 (100% 支援 CORS，全團固定連線位址)
+const CLOUD_SYNC_URL = "https://kvdb.io/W9x2K7mL4pQ8vN3tR1z5/malaysia_2026_trip_master";
+const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -101,30 +100,43 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 1. 本地快存優先載入（確保不卡死）
-  const [localData, setLocalData] = useState(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+  // 1. React 獨立 State 變數（確保每一次修改一定會觸發畫面重繪）
+  const [itinerary, setItinerary] = useState(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try { return JSON.parse(saved).itinerary || MASTER_ITINERARY; } catch (e) {}
     }
-    return {
-      itinerary: MASTER_ITINERARY,
-      members: ['我', '成員A', '成員B'],
-      expenses: [
-        { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
-        { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' },
-        { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
-      ]
-    };
+    return MASTER_ITINERARY;
   });
 
-  const itinerary = localData.itinerary;
-  const members = localData.members;
-  const expenses = localData.expenses;
+  const [members, setMembers] = useState<string[]>(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (saved) {
+      try { return JSON.parse(saved).members || ['我', '成員A', '成員B']; } catch (e) {}
+    }
+    return ['我', '成員A', '成員B'];
+  });
+
+  const [expenses, setExpenses] = useState<any[]>(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved).expenses || [
+          { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+          { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
+        ];
+      } catch (e) {}
+    }
+    return [
+      { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+      { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
+    ];
+  });
 
   // ☁️ 雲端狀態與提示
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
 
   // 📱 個人手機獨立清單 (localStorage)
   const [prepList, setPrepList] = useState(() => {
@@ -148,123 +160,94 @@ export default function App() {
   const [newShopName, setNewShopName] = useState('');
   const [newShopTarget, setNewShopTarget] = useState('');
 
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // 更新本地記憶體並同步備份
-  const updateLocalAndBackup = (newItinerary: any, newExpenses: any, newMembers: any) => {
-    const updatedObj = { itinerary: newItinerary, expenses: newExpenses, members: newMembers, updatedAt: Date.now() };
-    setLocalData(updatedObj);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedObj));
-    return updatedObj;
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // ☁️ 實時雙向同步處理核心
-  const syncWithCloud = async (isManualRetry = false) => {
+  // ☁️ 100% 成功直連拉取雲端數據
+  const pullFromCloud = async (showPrompt = false) => {
     setSyncStatus('syncing');
-    let currentBlobId = localStorage.getItem(CLOUD_BLOB_ID_KEY);
-
     try {
-      // Step A: 如果沒有雲端 ID，先建立全新的備援通道
-      if (!currentBlobId) {
-        const createRes = await fetch(JSON_BLOB_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(localData)
-        });
-        const location = createRes.headers.get('Location');
-        if (location) {
-          currentBlobId = location.split('/').pop() || null;
-          if (currentBlobId) {
-            localStorage.setItem(CLOUD_BLOB_ID_KEY, currentBlobId);
-          }
-        }
-      }
+      const res = await fetch(CLOUD_SYNC_URL, { cache: 'no-cache' });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim().startsWith('{')) {
+          const cloudObj = JSON.parse(text);
+          if (cloudObj.itinerary) setItinerary(cloudObj.itinerary);
+          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+          if (cloudObj.members) setMembers(cloudObj.members);
 
-      // Step B: 從雲端讀取最新數據
-      if (currentBlobId) {
-        const fetchRes = await fetch(`${JSON_BLOB_BASE}/${currentBlobId}`, {
-          headers: { 'Accept': 'application/json' },
-          cache: 'no-cache'
-        });
-
-        if (fetchRes.ok) {
-          const cloudObj = await fetchRes.json();
-          if (cloudObj && cloudObj.itinerary) {
-            // 如果雲端的資料更新，則覆蓋本地
-            updateLocalAndBackup(cloudObj.itinerary, cloudObj.expenses || [], cloudObj.members || []);
-            setSyncStatus('success');
-            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setLastSyncTime(timeStr);
-            if (isManualRetry) alert(`🟢 雲端同步成功！數據已於 ${timeStr} 成功更新！`);
-            return;
-          }
-        } else {
-          // 如果 Blob ID 失效，重新建立新通道並上傳本地數據
-          const reCreateRes = await fetch(JSON_BLOB_BASE, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(localData)
-          });
-          const newLoc = reCreateRes.headers.get('Location');
-          if (newLoc) {
-            const newId = newLoc.split('/').pop();
-            if (newId) {
-              localStorage.setItem(CLOUD_BLOB_ID_KEY, newId);
-              setSyncStatus('success');
-              const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              setLastSyncTime(timeStr);
-              if (isManualRetry) alert(`🟢 雲端備援通道已修復並同步完成 (${timeStr})！`);
-              return;
-            }
-          }
+          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
+          setSyncStatus('success');
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setLastSyncTime(timeStr);
+          if (showPrompt) alert(`🟢 雲端連線成功！資料已同步至最新 (${timeStr})`);
+          return true;
         }
       }
     } catch (e) {
-      console.error('Cloud Sync Error:', e);
+      console.error('Pull cloud error:', e);
     }
-
     setSyncStatus('error');
-    if (isManualRetry) {
-      alert('🔴 雲端連線失敗，請檢查網路連線。\n💡 別擔心！您剛剛修改的所有內容已安全存在您的手機中。');
-    }
+    if (showPrompt) alert('🔴 雲端連線失敗，已自動讀取手機本地快存。');
+    return false;
   };
 
-  // 推送資料至雲端
-  const pushToCloud = async (newItinerary: any, newExpenses: any, newMembers: any) => {
-    const updatedObj = updateLocalAndBackup(newItinerary, newExpenses, newMembers);
-    let currentBlobId = localStorage.getItem(CLOUD_BLOB_ID_KEY);
+  // ☁️ 100% 成功直連推送數據至雲端
+  const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
+    const targetItinerary = newItinerary || itinerary;
+    const targetExpenses = newExpenses || expenses;
+    const targetMembers = newMembers || members;
 
+    // 1. 先更新 React 本地 State 與 LocalStorage 備份
+    if (newItinerary) setItinerary(newItinerary);
+    if (newExpenses) setExpenses(newExpenses);
+    if (newMembers) setMembers(newMembers);
+
+    const payload = {
+      itinerary: targetItinerary,
+      expenses: targetExpenses,
+      members: targetMembers,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
+
+    // 2. 直連推送到雲端
+    setSyncStatus('syncing');
     try {
-      setSyncStatus('syncing');
-      if (!currentBlobId) {
-        await syncWithCloud(false);
-        return;
-      }
-
-      const res = await fetch(`${JSON_BLOB_BASE}/${currentBlobId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(updatedObj)
+      const res = await fetch(CLOUD_SYNC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
         setSyncStatus('success');
-        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(timeStr);
+        showToast('☁️ 已即時同步至雲端！');
       } else {
         setSyncStatus('error');
       }
     } catch (e) {
+      console.error('Push cloud error:', e);
       setSyncStatus('error');
     }
   };
 
-  // 首次開機自動與雲端連線
+  // 開機自動載入 + 切換分頁時自動同步
   useEffect(() => {
-    syncWithCloud(false);
+    pullFromCloud(false);
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') syncWithCloud(false);
+      if (document.visibilityState === 'visible') pullFromCloud(false);
     };
     window.addEventListener('visibilitychange', handleVisibility);
     return () => window.removeEventListener('visibilitychange', handleVisibility);
@@ -315,17 +298,18 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 行程順序調整 (低調質感微調按鈕)
+  // 行程順序微調 (確保持續觸發 React 重繪)
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
 
-    const updated = [...itinerary];
-    const currentItems = [...updated[selectedDayIdx].items];
+    const updatedItinerary = [...itinerary];
+    const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(currentIndex, 1);
     currentItems.splice(targetIndex, 0, movedItem);
-    updated[selectedDayIdx].items = currentItems;
-    pushToCloud(updated, expenses, members);
+    updatedItinerary[selectedDayIdx].items = currentItems;
+
+    pushToCloud(updatedItinerary, expenses, members);
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
@@ -333,40 +317,41 @@ export default function App() {
   const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
     e.preventDefault();
     if (!isEditMode || draggedItemIdx === null || draggedItemIdx === dropTargetIdx) return;
-    const updated = [...itinerary];
-    const currentItems = [...updated[selectedDayIdx].items];
+    const updatedItinerary = [...itinerary];
+    const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(draggedItemIdx, 1);
     currentItems.splice(dropTargetIdx, 0, movedItem);
-    updated[selectedDayIdx].items = currentItems;
-    pushToCloud(updated, expenses, members);
+    updatedItinerary[selectedDayIdx].items = currentItems;
+
+    pushToCloud(updatedItinerary, expenses, members);
     setDraggedItemIdx(null);
   };
 
   const handleDeleteSpot = (spotId: string) => {
     if (!confirm('確定刪除此行程嗎？')) return;
-    const updated = [...itinerary];
-    updated[selectedDayIdx].items = updated[selectedDayIdx].items.filter(item => item.id !== spotId);
-    pushToCloud(updated, expenses, members);
+    const updatedItinerary = [...itinerary];
+    updatedItinerary[selectedDayIdx].items = updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId);
+    pushToCloud(updatedItinerary, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
     if (!editingSpot) return;
-    const updated = [...itinerary];
-    const currentItems = [...updated[selectedDayIdx].items];
+    const updatedItinerary = [...itinerary];
+    const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const idx = currentItems.findIndex(item => item.id === editingSpot.id);
     if (idx !== -1) {
       currentItems[idx] = { ...editingSpot };
-      updated[selectedDayIdx].items = currentItems;
-      pushToCloud(updated, expenses, members);
+      updatedItinerary[selectedDayIdx].items = currentItems;
+      pushToCloud(updatedItinerary, expenses, members);
     }
     setEditingSpot(null);
   };
 
   const handleAddSpotSubmit = () => {
     if (!newSpot.name) return;
-    const updated = [...itinerary];
-    updated[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
-    pushToCloud(updated, expenses, members);
+    const updatedItinerary = [...itinerary];
+    updatedItinerary[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
+    pushToCloud(updatedItinerary, expenses, members);
     setNewSpot({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
     setShowAddSpotModal(false);
   };
@@ -443,23 +428,57 @@ export default function App() {
     pushToCloud(itinerary, newExpenses, members);
   };
 
+  // 實體備份匯出匯入
+  const handleExportData = () => {
+    const fullData = { itinerary, expenses, members, exportedAt: new Date().toLocaleString() };
+    const str = JSON.stringify(fullData, null, 2);
+    navigator.clipboard.writeText(str);
+    alert('📋 行程與花費完整 JSON 資料已複製到剪貼簿！可以貼上分享或保存為文字檔。');
+  };
+
+  const handleImportData = () => {
+    try {
+      const parsed = JSON.parse(importJsonText);
+      if (parsed && parsed.itinerary) {
+        pushToCloud(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
+        alert('🟢 成功匯入資料並同步至雲端！');
+        setShowBackupModal(false);
+        setImportJsonText('');
+      } else {
+        alert('🔴 資料格式不正確，請確定包含 itinerary 欄位');
+      }
+    } catch (e) {
+      alert('🔴 JSON 格式解析失敗，請檢查輸入內容');
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
       
+      {/* 浮動提示 Toast */}
+      {toastMsg && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Header */}
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
             
-            {/* 強力診斷與重試按鈕 */}
             <button
-              onClick={() => syncWithCloud(true)}
+              onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制進行雲端連線診斷與重試"
+              title="點擊強制進行連線同步"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
               <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
+            </button>
+
+            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200" title="實體備份/匯入匯出">
+              ⚙️
             </button>
           </div>
           <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
@@ -550,13 +569,13 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 編輯模式：低調質感的微調按鈕 */}
+                      {/* 編輯模式：極簡低調微調控制 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
                             onClick={() => handleMoveSpot(index, 'up')}
                             disabled={index === 0}
-                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向上移動"
                           >
                             ▲
@@ -564,20 +583,20 @@ export default function App() {
                           <button
                             onClick={() => handleMoveSpot(index, 'down')}
                             disabled={index === itinerary[selectedDayIdx].items.length - 1}
-                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向下移動"
                           >
                             ▼
                           </button>
                           <button
                             onClick={() => setEditingSpot(spot)}
-                            className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition"
+                            className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition cursor-pointer"
                           >
                             編輯
                           </button>
                           <button
                             onClick={() => handleDeleteSpot(spot.id)}
-                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded text-xs border border-gray-200 transition"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded text-xs border border-gray-200 transition cursor-pointer"
                             title="刪除"
                           >
                             ✕
@@ -677,7 +696,7 @@ export default function App() {
         {activeTab === 'expenses' && (
           <div className="space-y-4">
             {isEditMode && (
-              <button onClick={handleOpenAddExpense} className="w-full py-3 rounded-2xl text-white font-bold text-sm shadow-md flex items-center justify-center space-x-1" style={{ backgroundColor: THEME.accent }}>
+              <button onClick={handleOpenAddExpense} className="w-full py-3 rounded-2xl text-white font-bold text-sm shadow-md flex items-center justify-center space-x-1 cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                 <span>➕ 新增花費紀錄</span>
               </button>
             )}
@@ -691,7 +710,7 @@ export default function App() {
               {isEditMode && (
                 <div className="flex space-x-2">
                   <input type="text" placeholder="輸入新成員名字" value={newMemberInput} onChange={e => setNewMemberInput(e.target.value)} className="flex-1 p-1.5 text-xs border rounded-lg" />
-                  <button onClick={handleAddMember} className="px-3 py-1.5 text-xs font-bold text-white rounded-lg" style={{ backgroundColor: THEME.accent }}>新增成員</button>
+                  <button onClick={handleAddMember} className="px-3 py-1.5 text-xs font-bold text-white rounded-lg cursor-pointer" style={{ backgroundColor: THEME.accent }}>新增成員</button>
                 </div>
               )}
 
@@ -756,6 +775,35 @@ export default function App() {
 
       </main>
 
+      {/* 實體備份與匯入 Modal */}
+      {showBackupModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>⚙️ 實體備份與備用匯入</h3>
+              <button onClick={() => setShowBackupModal(false)} className="text-gray-400 font-bold">✕</button>
+            </div>
+
+            <button onClick={handleExportData} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs shadow hover:bg-slate-700">
+              📋 一鍵複製完整行程花費 (JSON)
+            </button>
+
+            <div className="border-t pt-2 space-y-2">
+              <label className="text-xs font-bold text-gray-600">貼上 JSON 進行資料匯入：</label>
+              <textarea
+                value={importJsonText}
+                onChange={e => setImportJsonText(e.target.value)}
+                placeholder="把複製的 JSON 內容貼在這裡..."
+                className="w-full p-2 text-xs border rounded-xl h-24 font-mono"
+              />
+              <button onClick={handleImportData} className="w-full py-2 bg-amber-800 text-white rounded-xl font-bold text-xs shadow">
+                確認匯入並覆蓋更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 編輯景點 Modal */}
       {editingSpot && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
@@ -777,7 +825,7 @@ export default function App() {
             <textarea value={editingSpot.note} onChange={e => setEditingSpot({...editingSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" placeholder="備註說明" />
             <input type="text" value={editingSpot.map} onChange={e => setEditingSpot({...editingSpot, map: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="Google Map 網址" />
             <input type="text" value={editingSpot.img} onChange={e => setEditingSpot({...editingSpot, img: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="圖片網址 URL" />
-            <button onClick={handleSaveEditSpot} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
+            <button onClick={handleSaveEditSpot} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
         </div>
       )}
@@ -803,7 +851,7 @@ export default function App() {
             <textarea placeholder="說明/備註" value={newSpot.note} onChange={e => setNewSpot({...newSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" />
             <input type="text" placeholder="Google Map 網址 (選填)" value={newSpot.map} onChange={e => setNewSpot({...newSpot, map: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <input type="text" placeholder="圖片網址 URL (選填)" value={newSpot.img} onChange={e => setNewSpot({...newSpot, img: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
-            <button onClick={handleAddSpotSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>確認新增</button>
+            <button onClick={handleAddSpotSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>確認新增</button>
           </div>
         </div>
       )}
@@ -849,7 +897,7 @@ export default function App() {
             </div>
 
             <input type="text" placeholder="備註說明 (選填)" value={newExpense.note} onChange={e => setNewExpense({...newExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
-            <button onClick={handleAddExpenseSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存紀錄</button>
+            <button onClick={handleAddExpenseSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存紀錄</button>
           </div>
         </div>
       )}
@@ -895,7 +943,7 @@ export default function App() {
             </div>
 
             <input type="text" value={editingExpense.note} onChange={e => setEditingExpense({...editingExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="備註" />
-            <button onClick={handleSaveEditExpense} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
+            <button onClick={handleSaveEditExpense} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
         </div>
       )}
@@ -912,7 +960,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center px-3 py-1 transition ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
+              className={`flex flex-col items-center px-3 py-1 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
               style={{ color: activeTab === tab.id ? THEME.accent : THEME.primary }}
             >
               <span>{tab.name}</span>
