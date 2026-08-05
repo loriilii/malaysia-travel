@@ -1,23 +1,5 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>馬來西亞 8天7夜</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  html, body { margin: 0; padding: 0; background: #F3ECDE; }
-  .scrollbar-none::-webkit-scrollbar { display: none; }
-  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef } = React;
+import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom/client';
 
 const THEME = {
   primary: '#183451',
@@ -25,6 +7,10 @@ const THEME = {
   bg: '#F3ECDE',
   sand: '#D4AF83'
 };
+
+// ☁️ 全球 100% 免驗證開放直連資料庫通道 (跨手機 100% 互通)
+const NPOINT_API_URL = "https://api.npoint.io/88ef3914a1a6f0227183";
+const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_FINAL_STORAGE_V6";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -38,7 +24,7 @@ const DEFAULT_HOURLY_WEATHER = [
   { time: "21:00", temp: "27°", rain: "10%", icon: "🌙" }
 ];
 
-// 預設 8 天行程（第一次使用、雲端還沒有資料時的初始值）
+// 預設 8 天行程
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
@@ -110,283 +96,171 @@ const MASTER_ITINERARY = [
   }
 ];
 
-const DEFAULT_MEMBERS = ['我', '成員A', '成員B'];
-const DEFAULT_EXPENSES = [
-  { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
-  { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
-];
-const DEFAULT_PREP_LIST = [
-  { id: 1, cat: "衣物配件", text: "排汗衫 / 薄短袖", done: false },
-  { id: 2, cat: "衣物配件", text: "薄外套 / 防曬罩衫", done: false },
-  { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
-];
-const DEFAULT_SHOPPING_LIST = [
-  { id: 1, name: "舊街場白咖啡 (OldTown)", target: "超市", bought: false },
-  { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
-];
-
-// ── 儲存層設定 ─────────────────────────────────────────────
-// 在 Claude 對話框裡開啟 Artifact 時，window.storage 會自動存在，直接用它（不需任何設定）。
-// 自行架站 / 直接打開 HTML 檔時，window.storage 不存在，改用 jsonblob.com + 網址參數，
-// 讓「同一個網址」的所有裝置都讀寫同一份資料。
-const USE_CLAUDE_STORAGE = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
-const JSON_BLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
-const TRIP_DATA_KEY = 'trip-data';
-const PREP_LIST_KEY = 'my_malaysia_prep';
-const SHOPPING_LIST_KEY = 'my_malaysia_shopping';
-
-function getTripIdFromUrl() {
-  try {
-    return new URLSearchParams(window.location.search).get('tripId') || '';
-  } catch (e) { return ''; }
-}
-
-function setTripIdInUrl(id) {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set('tripId', id);
-    window.history.replaceState({}, '', url.toString());
-  } catch (e) {}
-}
-
-function App() {
+export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 共用行程資料（所有裝置共用）
-  const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
-  const [members, setMembers] = useState(DEFAULT_MEMBERS);
-  const [expenses, setExpenses] = useState(DEFAULT_EXPENSES);
+  // 1. React 本地狀態
+  const [itinerary, setItinerary] = useState(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (saved) {
+      try { return JSON.parse(saved).itinerary || MASTER_ITINERARY; } catch (e) {}
+    }
+    return MASTER_ITINERARY;
+  });
 
-  // 個人清單（僅存於此裝置/瀏覽器）
-  const [prepList, setPrepList] = useState(DEFAULT_PREP_LIST);
-  const [shoppingList, setShoppingList] = useState(DEFAULT_SHOPPING_LIST);
+  const [members, setMembers] = useState<string[]>(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (saved) {
+      try { return JSON.parse(saved).members || ['我', '成員A', '成員B']; } catch (e) {}
+    }
+    return ['我', '成員A', '成員B'];
+  });
 
-  // ☁️ 同步狀態
-  const [syncStatus, setSyncStatus] = useState('syncing'); // syncing | success | error
+  const [expenses, setExpenses] = useState<any[]>(() => {
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved).expenses || [
+          { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+          { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
+        ];
+      } catch (e) {}
+    }
+    return [
+      { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+      { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
+    ];
+  });
+
+  // ☁️ 雲端狀態與提示
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
-  const [isReady, setIsReady] = useState(false);
-  const [shareUrl, setShareUrl] = useState('');
-  const [showShareBanner, setShowShareBanner] = useState(false);
 
-  const hasLoadedOnce = useRef(false);
-  const cloudIdRef = useRef(getTripIdFromUrl());
-  const creatingRef = useRef(null);
+  // 📱 個人手機獨立清單 (localStorage)
+  const [prepList, setPrepList] = useState(() => {
+    const saved = localStorage.getItem('my_malaysia_prep');
+    return saved ? JSON.parse(saved) : [
+      { id: 1, cat: "衣物配件", text: "排汗衫 / 薄短袖", done: false },
+      { id: 2, cat: "衣物配件", text: "薄外套 / 防曬罩衫", done: false },
+      { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
+    ];
+  });
+  const [newPrepText, setNewPrepText] = useState('');
+  const [newPrepCat] = useState('個人物品');
 
-  const showToast = (msg) => {
+  const [shoppingList, setShoppingList] = useState(() => {
+    const saved = localStorage.getItem('my_malaysia_shopping');
+    return saved ? JSON.parse(saved) : [
+      { id: 1, name: "舊街場白咖啡 (OldTown)", target: "超市", bought: false },
+      { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
+    ];
+  });
+  const [newShopName, setNewShopName] = useState('');
+  const [newShopTarget, setNewShopTarget] = useState('');
+
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+
+  useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
+  useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
+
+  const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // 驗證行程資料格式是否正確，避免壞資料讓畫面崩潰變白
-  const isValidItinerary = (val) =>
-    Array.isArray(val) && val.length > 0 && val.every(d => d && Array.isArray(d.items));
-
-  // 確保有一個共用的雲端代碼（jsonblob 模式專用）：若還沒有，用目前資料建立一份，
-  // 並把代碼寫進網址列，之後把這個網址分享/收藏給同行的人即可跨裝置同步
-  const ensureCloudId = async (initialPayload) => {
-    if (cloudIdRef.current) return cloudIdRef.current;
-    if (creatingRef.current) return creatingRef.current;
-    creatingRef.current = (async () => {
-      try {
-        const createRes = await fetch(JSON_BLOB_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(initialPayload)
-        });
-        const location = createRes.headers.get('Location');
-        const id = location ? location.split('/').pop() : null;
-        if (id) {
-          cloudIdRef.current = id;
-          setTripIdInUrl(id);
-          setShareUrl(window.location.href);
-          setShowShareBanner(true);
-        }
-        return id;
-      } catch (e) {
-        console.error('建立雲端資料失敗', e);
-        return null;
-      } finally {
-        creatingRef.current = null;
-      }
-    })();
-    return creatingRef.current;
-  };
-
-  // 讀取共用行程資料
-  const pullTripData = async (isManualRetry = false) => {
+  // ☁️ 100% 跨手機真同步拉取 (GET)
+  const pullFromCloud = async (isManualRetry = false) => {
     setSyncStatus('syncing');
     try {
-      if (USE_CLAUDE_STORAGE) {
-        const result = await window.storage.get(TRIP_DATA_KEY, true);
-        if (result && result.value) {
-          applyCloudPayload(JSON.parse(result.value), isManualRetry);
-        } else {
-          markSynced();
-        }
-      } else {
-        const id = cloudIdRef.current;
-        if (!id) {
-          // 這個網址還沒有連結任何共用行程，用目前畫面上的資料建立一份新的
-          await ensureCloudId({ itinerary, expenses, members, updatedAt: Date.now() });
-          markSynced();
-        } else {
-          const res = await fetch(`${JSON_BLOB_BASE}/${id}`, { cache: 'no-cache' });
-          if (res.ok) {
-            const cloudObj = await res.json();
-            applyCloudPayload(cloudObj, isManualRetry);
-          } else {
-            setSyncStatus('error');
-            if (isManualRetry) alert('🔴 網址裡的雲端代碼已失效或找不到資料，請確認網址是否正確。');
+      const res = await fetch(NPOINT_API_URL, { cache: 'no-cache' });
+      if (res.ok) {
+        const cloudObj = await res.json();
+        if (cloudObj && cloudObj.itinerary) {
+          setItinerary(cloudObj.itinerary);
+          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+          if (cloudObj.members) setMembers(cloudObj.members);
+
+          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
+          setSyncStatus('success');
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSyncTime(timeStr);
+
+          if (isManualRetry) {
+            alert(`🟢 跨手機雲端連線 100% 成功！\n\n- 通道狀態：200 OK (npoint API)\n- 行程天數：${cloudObj.itinerary.length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 同步時間：${timeStr}\n\n這代表所有手機開網頁都會看到這份資料！`);
           }
+          return true;
+        } else {
+          // 如果雲端空了，自動寫入預設行程
+          await pushToCloud(itinerary, expenses, members);
+          return true;
         }
       }
-    } catch (err) {
-      if (err instanceof SyntaxError) {
-        console.error('雲端資料 JSON 解析失敗', err);
-        showToast('⚠️ 雲端資料損毀，已改用目前畫面上的版本');
-      } else {
-        console.error('Pull trip data error:', err);
-      }
-      markSynced();
+    } catch (e) {
+      console.error('Pull cloud error:', e);
     }
-    return true;
-  };
 
-  const applyCloudPayload = (cloudObj, isManualRetry) => {
-    if (isValidItinerary(cloudObj.itinerary)) {
-      setItinerary(cloudObj.itinerary);
-      setSelectedDayIdx(prev => Math.min(prev, cloudObj.itinerary.length - 1));
-    } else if (cloudObj.itinerary) {
-      console.warn('雲端 itinerary 格式不正確，改用預設行程', cloudObj.itinerary);
-      showToast('⚠️ 雲端行程資料格式異常，已改用預設行程顯示');
-    }
-    if (Array.isArray(cloudObj.expenses)) setExpenses(cloudObj.expenses);
-    if (Array.isArray(cloudObj.members) && cloudObj.members.length > 0) setMembers(cloudObj.members);
-    markSynced();
+    setSyncStatus('error');
     if (isManualRetry) {
-      const dayCount = isValidItinerary(cloudObj.itinerary) ? cloudObj.itinerary.length : itinerary.length;
-      alert(`🟢 雲端連線正常\n\n- 行程天數：${dayCount} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆`);
+      alert('🔴 網路連線異常，已自動載入手機本地快存。');
     }
+    return false;
   };
 
-  const markSynced = () => {
-    setSyncStatus('success');
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setLastSyncTime(timeStr);
-  };
-
-  // 寫入共用行程資料
-  const pushTripData = async (newItinerary, newExpenses, newMembers) => {
+  // ☁️ 100% 跨手機真同步推送 (POST)
+  const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
     const targetItinerary = newItinerary || itinerary;
     const targetExpenses = newExpenses || expenses;
     const targetMembers = newMembers || members;
 
-    setItinerary(targetItinerary);
-    setExpenses(targetExpenses);
-    setMembers(targetMembers);
+    // 1. 立即更新 React 本地 UI
+    if (newItinerary) setItinerary(newItinerary);
+    if (newExpenses) setExpenses(newExpenses);
+    if (newMembers) setMembers(newMembers);
 
+    const payload = {
+      itinerary: targetItinerary,
+      expenses: targetExpenses,
+      members: targetMembers,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
+
+    // 2. 推送到公共雲端點
     setSyncStatus('syncing');
-    const payload = { itinerary: targetItinerary, expenses: targetExpenses, members: targetMembers, updatedAt: Date.now() };
-
     try {
-      if (USE_CLAUDE_STORAGE) {
-        const result = await window.storage.set(TRIP_DATA_KEY, JSON.stringify(payload), true);
-        if (result) {
-          markSynced();
-          showToast('☁️ 已同步至雲端，其他裝置下次開啟即可看到最新版本');
-        } else {
-          setSyncStatus('error');
-          showToast('⚠️ 同步失敗，請點右上角重試');
-        }
-      } else {
-        const id = await ensureCloudId(payload);
-        if (!id) {
-          setSyncStatus('error');
-          showToast('⚠️ 同步失敗，請檢查網路連線後點右上角重試');
-          return;
-        }
-        const res = await fetch(`${JSON_BLOB_BASE}/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-          markSynced();
-          showToast('☁️ 已同步至雲端，用同一個網址開啟的裝置都會看到最新版本');
-        } else {
-          setSyncStatus('error');
-          showToast('⚠️ 同步失敗，請點右上角重試');
-        }
+      const res = await fetch(NPOINT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        setSyncStatus('success');
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(timeStr);
+        showToast('☁️ 已即時同步給所有手機！');
+        return;
       }
-    } catch (err) {
-      console.error('Push trip data error:', err);
-      setSyncStatus('error');
-      showToast('⚠️ 同步失敗，請點右上角重試');
+    } catch (e) {
+      console.error('Push cloud error:', e);
     }
+
+    setSyncStatus('error');
   };
 
-  // 個人清單：讀取（Claude 環境用 window.storage，自架環境用 localStorage，僅存於此裝置）
-  const loadPersonalLists = async () => {
-    if (USE_CLAUDE_STORAGE) {
-      try {
-        const prepResult = await window.storage.get(PREP_LIST_KEY, false);
-        if (prepResult && prepResult.value) setPrepList(JSON.parse(prepResult.value));
-      } catch (e) { /* key 尚不存在，使用預設值 */ }
-      try {
-        const shopResult = await window.storage.get(SHOPPING_LIST_KEY, false);
-        if (shopResult && shopResult.value) setShoppingList(JSON.parse(shopResult.value));
-      } catch (e) { /* key 尚不存在，使用預設值 */ }
-    } else {
-      try {
-        const saved = localStorage.getItem(PREP_LIST_KEY);
-        if (saved) setPrepList(JSON.parse(saved));
-      } catch (e) {}
-      try {
-        const saved = localStorage.getItem(SHOPPING_LIST_KEY);
-        if (saved) setShoppingList(JSON.parse(saved));
-      } catch (e) {}
-    }
-  };
-
-  const savePrepList = async (list) => {
-    setPrepList(list);
-    try {
-      if (USE_CLAUDE_STORAGE) await window.storage.set(PREP_LIST_KEY, JSON.stringify(list), false);
-      else localStorage.setItem(PREP_LIST_KEY, JSON.stringify(list));
-    } catch (e) { console.error(e); }
-  };
-
-  const saveShoppingList = async (list) => {
-    setShoppingList(list);
-    try {
-      if (USE_CLAUDE_STORAGE) await window.storage.set(SHOPPING_LIST_KEY, JSON.stringify(list), false);
-      else localStorage.setItem(SHOPPING_LIST_KEY, JSON.stringify(list));
-    } catch (e) { console.error(e); }
-  };
-
-  // 開機讀取，並在切回前景時重新拉取共用資料（模擬跨裝置同步）
+  // 網頁開啟時 + 切換視窗時自動抓取最新雲端資料
   useEffect(() => {
-    (async () => {
-      await Promise.all([pullTripData(false), loadPersonalLists()]);
-      hasLoadedOnce.current = true;
-      setIsReady(true);
-    })();
+    pullFromCloud(false);
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && hasLoadedOnce.current) pullTripData(false);
+      if (document.visibilityState === 'visible') pullFromCloud(false);
     };
     window.addEventListener('visibilitychange', handleVisibility);
     return () => window.removeEventListener('visibilitychange', handleVisibility);
   }, []);
-
-  // 若行程天數變短（例如換了雲端資料），確保選到的天數索引不會超出範圍
-  useEffect(() => {
-    if (Array.isArray(itinerary) && itinerary.length > 0 && selectedDayIdx > itinerary.length - 1) {
-      setSelectedDayIdx(itinerary.length - 1);
-    }
-  }, [itinerary]);
 
   // 🌤️ 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
@@ -422,27 +296,19 @@ function App() {
 
   // UI State
   const [isEditMode, setIsEditMode] = useState(false);
-  const [draggedItemIdx, setDraggedItemIdx] = useState(null);
+  const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
   const [filterMember, setFilterMember] = useState('全部');
   const [newMemberInput, setNewMemberInput] = useState('');
 
-  const [editingSpot, setEditingSpot] = useState(null);
+  const [editingSpot, setEditingSpot] = useState<any>(null);
   const [showAddSpotModal, setShowAddSpotModal] = useState(false);
   const [newSpot, setNewSpot] = useState({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-  const [editingExpense, setEditingExpense] = useState(null);
-  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [], note: '' });
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  const [newPrepText, setNewPrepText] = useState('');
-  const [newPrepCat] = useState('個人物品');
-  const [newShopName, setNewShopName] = useState('');
-  const [newShopTarget, setNewShopTarget] = useState('');
-
-  const [showBackupModal, setShowBackupModal] = useState(false);
-  const [importJsonText, setImportJsonText] = useState('');
-
-  // 行程順序調整
-  const handleMoveSpot = (currentIndex, direction) => {
+  // 行程順序微調
+  const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
 
@@ -450,31 +316,31 @@ function App() {
     const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(currentIndex, 1);
     currentItems.splice(targetIndex, 0, movedItem);
-    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
+    updatedItinerary[selectedDayIdx].items = currentItems;
 
-    pushTripData(updatedItinerary, expenses, members);
+    pushToCloud(updatedItinerary, expenses, members);
   };
 
-  const handleDragStart = (e, index) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
-  const handleDragOver = (e) => { e.preventDefault(); };
-  const handleDrop = (e, dropTargetIdx) => {
+  const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
     e.preventDefault();
     if (!isEditMode || draggedItemIdx === null || draggedItemIdx === dropTargetIdx) return;
     const updatedItinerary = [...itinerary];
     const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(draggedItemIdx, 1);
     currentItems.splice(dropTargetIdx, 0, movedItem);
-    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
+    updatedItinerary[selectedDayIdx].items = currentItems;
 
-    pushTripData(updatedItinerary, expenses, members);
+    pushToCloud(updatedItinerary, expenses, members);
     setDraggedItemIdx(null);
   };
 
-  const handleDeleteSpot = (spotId) => {
+  const handleDeleteSpot = (spotId: string) => {
     if (!confirm('確定刪除此行程嗎？')) return;
     const updatedItinerary = [...itinerary];
-    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId) };
-    pushTripData(updatedItinerary, expenses, members);
+    updatedItinerary[selectedDayIdx].items = updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId);
+    pushToCloud(updatedItinerary, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
@@ -484,8 +350,8 @@ function App() {
     const idx = currentItems.findIndex(item => item.id === editingSpot.id);
     if (idx !== -1) {
       currentItems[idx] = { ...editingSpot };
-      updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
-      pushTripData(updatedItinerary, expenses, members);
+      updatedItinerary[selectedDayIdx].items = currentItems;
+      pushToCloud(updatedItinerary, expenses, members);
     }
     setEditingSpot(null);
   };
@@ -493,20 +359,20 @@ function App() {
   const handleAddSpotSubmit = () => {
     if (!newSpot.name) return;
     const updatedItinerary = [...itinerary];
-    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: [...updatedItinerary[selectedDayIdx].items, { ...newSpot, id: Date.now().toString() }] };
-    pushTripData(updatedItinerary, expenses, members);
+    updatedItinerary[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
+    pushToCloud(updatedItinerary, expenses, members);
     setNewSpot({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
     setShowAddSpotModal(false);
   };
 
   // 團員管理
-  const handleRenameMember = (oldName) => {
+  const handleRenameMember = (oldName: string) => {
     const newName = prompt(`請輸入成員【${oldName}】的新名字：`, oldName);
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
     const trimmed = newName.trim();
     const newMembers = members.map(m => m === oldName ? trimmed : m);
     const newExpenses = expenses.map(e => ({ ...e, splitFor: e.splitFor.map(s => s === oldName ? trimmed : s) }));
-    pushTripData(itinerary, newExpenses, newMembers);
+    pushToCloud(itinerary, newExpenses, newMembers);
     if (filterMember === oldName) setFilterMember(trimmed);
   };
 
@@ -514,26 +380,32 @@ function App() {
     if (!newMemberInput.trim()) return;
     if (members.includes(newMemberInput.trim())) return alert('成員已存在');
     const newMembers = [...members, newMemberInput.trim()];
-    pushTripData(itinerary, expenses, newMembers);
+    pushToCloud(itinerary, expenses, newMembers);
     setNewMemberInput('');
   };
 
-  const handleDeleteMember = (target) => {
+  const handleDeleteMember = (target: string) => {
     if (members.length <= 1) return alert('請至少留一位成員');
     if (confirm(`確定刪除成員【${target}】嗎？`)) {
       const newMembers = members.filter(m => m !== target);
-      pushTripData(itinerary, expenses, newMembers);
+      pushToCloud(itinerary, expenses, newMembers);
       if (filterMember === target) setFilterMember('全部');
     }
   };
 
   // 花費管理
   const handleOpenAddExpense = () => {
-    setNewExpense({ item: '', amount: '', currency: 'MYR', selectedMembers: [...members], note: '' });
+    setNewExpense({
+      item: '',
+      amount: '',
+      currency: 'MYR',
+      selectedMembers: [...members],
+      note: ''
+    });
     setShowAddExpenseModal(true);
   };
 
-  const handleAddExpenseSubmit = (e) => {
+  const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newExpense.item || !newExpense.amount) return;
     if (newExpense.selectedMembers.length === 0) return alert('請至少勾選一位分攤成員！');
@@ -547,7 +419,7 @@ function App() {
       splitFor: newExpense.selectedMembers,
       note: newExpense.note
     }];
-    pushTripData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
     setShowAddExpenseModal(false);
   };
 
@@ -555,35 +427,17 @@ function App() {
     if (!editingExpense) return;
     if (editingExpense.splitFor.length === 0) return alert('請至少勾選一位分攤成員！');
     const newExpenses = expenses.map(e => e.id === editingExpense.id ? editingExpense : e);
-    pushTripData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
     setEditingExpense(null);
   };
 
-  const handleDeleteExpense = (id) => {
+  const handleDeleteExpense = (id: number) => {
     if (!confirm('確定刪除此筆花費嗎？')) return;
     const newExpenses = expenses.filter(e => e.id !== id);
-    pushTripData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
   };
 
-  // 個人清單操作
-  const toggleFilterPrep = (id) => savePrepList(prepList.map(p => p.id === id ? { ...p, done: !p.done } : p));
-  const addPrepItem = () => {
-    if (!newPrepText.trim()) return;
-    savePrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]);
-    setNewPrepText('');
-  };
-  const deletePrepItem = (id) => savePrepList(prepList.filter(p => p.id !== id));
-
-  const toggleShopping = (id) => saveShoppingList(shoppingList.map(item => item.id === id ? { ...item, bought: !item.bought } : item));
-  const addShoppingItem = () => {
-    if (!newShopName.trim()) return;
-    saveShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]);
-    setNewShopName('');
-    setNewShopTarget('');
-  };
-  const deleteShoppingItem = (id) => saveShoppingList(shoppingList.filter(item => item.id !== id));
-
-  // 實體備份匯出匯入（額外保險，不依賴雲端也能轉移資料）
+  // 實體備份匯出匯入
   const handleExportData = () => {
     const fullData = { itinerary, expenses, members, exportedAt: new Date().toLocaleString() };
     const str = JSON.stringify(fullData, null, 2);
@@ -595,8 +449,8 @@ function App() {
     try {
       const parsed = JSON.parse(importJsonText);
       if (parsed && parsed.itinerary) {
-        pushTripData(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
-        alert('🟢 成功匯入資料並同步至雲端！');
+        pushToCloud(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
+        alert('🟢 成功匯入資料並同步至全團雲端！');
         setShowBackupModal(false);
         setImportJsonText('');
       } else {
@@ -607,87 +461,36 @@ function App() {
     }
   };
 
-  if (!isReady) {
-    return (
-      <div className="max-w-md mx-auto min-h-screen flex items-center justify-center" style={{ backgroundColor: THEME.bg }}>
-        <div className="text-center space-y-2">
-          <div className="text-3xl animate-pulse">🌴</div>
-          <div className="text-sm text-slate-500 font-medium">正在載入行程資料...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // 最後一道防線：如果 itinerary 是空的或索引超出範圍，顯示可操作的錯誤畫面而不是空白
-  if (!Array.isArray(itinerary) || itinerary.length === 0) {
-    return (
-      <div className="max-w-md mx-auto min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: THEME.bg }}>
-        <div className="text-center space-y-3 bg-white p-5 rounded-2xl shadow border border-amber-900/10">
-          <div className="text-3xl">⚠️</div>
-          <div className="text-sm font-bold" style={{ color: THEME.primary }}>行程資料異常</div>
-          <p className="text-xs text-gray-500">雲端行程資料是空的或格式不正確。</p>
-          <button
-            onClick={() => { setItinerary(MASTER_ITINERARY); setSelectedDayIdx(0); pushTripData(MASTER_ITINERARY, expenses, members); }}
-            className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer"
-            style={{ backgroundColor: THEME.accent }}
-          >
-            重設為預設行程並同步至雲端
-          </button>
-        </div>
-      </div>
-    );
-  }
-  const safeDayIdx = Math.min(Math.max(selectedDayIdx, 0), itinerary.length - 1);
-
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
-
+      
+      {/* 浮動提示 Toast */}
       {toastMsg && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50">
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
           {toastMsg}
         </div>
       )}
 
-      {showShareBanner && !USE_CLAUDE_STORAGE && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
-            <div className="text-2xl">🔗</div>
-            <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>行程已建立！請用這個網址分享同步</h3>
-            <p className="text-xs text-gray-600">把下面這個網址加到書籤，或傳給同行的家人朋友。<b>大家都要用這個網址</b>打開，資料才會即時同步，不能各自用原本的網址。</p>
-            <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] break-all font-mono text-slate-700">{shareUrl}</div>
-            <button
-              onClick={() => { navigator.clipboard.writeText(shareUrl); showToast('📋 網址已複製'); }}
-              className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer"
-              style={{ backgroundColor: THEME.accent }}
-            >
-              📋 複製網址
-            </button>
-            <button onClick={() => setShowShareBanner(false)} className="w-full py-2 text-xs font-bold text-slate-500 rounded-lg cursor-pointer">
-              我知道了，先關閉
-            </button>
-          </div>
-        </div>
-      )}
-
+      {/* Header */}
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
-
+            
             <button
-              onClick={() => pullTripData(true)}
+              onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制拉取雲端最新資料"
+              title="點擊診斷與拉取最新資料"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
-              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `全團同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
 
             <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
               ⚙️
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (npoint 跨手機連線)</p>
         </div>
 
         <button
@@ -702,6 +505,7 @@ function App() {
 
       <main className="p-4 space-y-4">
 
+        {/* TAB 1: 行程總覽 */}
         {activeTab === 'itinerary' && (
           <div className="space-y-3">
             <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
@@ -722,8 +526,8 @@ function App() {
 
             <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10 flex justify-between items-center">
               <div>
-                <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[safeDayIdx].title}</h2>
-                <p className="text-[10px] text-gray-400">📍 區域：{itinerary[safeDayIdx].city}</p>
+                <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
+                <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
               </div>
               {isEditMode && (
                 <button onClick={() => setShowAddSpotModal(true)} className="text-xs px-2.5 py-1.5 rounded-lg text-white font-bold shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
@@ -732,9 +536,10 @@ function App() {
               )}
             </div>
 
+            {/* 24 小時動態氣象 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[safeDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
+                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
                 <span className="text-[10px] text-slate-400">橫向滑動 →</span>
               </div>
               <div className="flex overflow-x-auto space-x-2.5 pb-1 pt-1 scrollbar-none">
@@ -749,8 +554,9 @@ function App() {
               </div>
             </div>
 
+            {/* 行程卡片 */}
             <div className="space-y-3 pt-1">
-              {itinerary[safeDayIdx].items.map((spot, index) => (
+              {itinerary[selectedDayIdx].items.map((spot, index) => (
                 <div
                   key={spot.id}
                   draggable={isEditMode}
@@ -772,6 +578,7 @@ function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
+                      {/* 編輯模式：微調控制 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
@@ -779,30 +586,38 @@ function App() {
                             disabled={index === 0}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向上移動"
-                          >▲</button>
+                          >
+                            ▲
+                          </button>
                           <button
                             onClick={() => handleMoveSpot(index, 'down')}
-                            disabled={index === itinerary[safeDayIdx].items.length - 1}
+                            disabled={index === itinerary[selectedDayIdx].items.length - 1}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向下移動"
-                          >▼</button>
+                          >
+                            ▼
+                          </button>
                           <button
                             onClick={() => setEditingSpot(spot)}
                             className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition cursor-pointer"
-                          >編輯</button>
+                          >
+                            編輯
+                          </button>
                           <button
                             onClick={() => handleDeleteSpot(spot.id)}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded text-xs border border-gray-200 transition cursor-pointer"
                             title="刪除"
-                          >✕</button>
+                          >
+                            ✕
+                          </button>
                         </div>
                       )}
                     </div>
 
                     <h3 className="font-bold text-sm mt-2" style={{ color: THEME.primary }}>{spot.name}</h3>
-
+                    
                     {spot.note && <p className="text-xs text-gray-600 mt-2 bg-amber-50/60 p-2 rounded-lg border border-amber-100">{spot.note}</p>}
-
+                    
                     {spot.map && (
                       <a
                         href={spot.map}
@@ -820,16 +635,17 @@ function App() {
           </div>
         )}
 
+        {/* TAB 2: 行前準備 */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增準備項目</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人裝置</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
-                <button onClick={addPrepItem} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+                <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                   新增
                 </button>
               </div>
@@ -839,30 +655,31 @@ function App() {
               <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🎒 個人檢查清單</h2>
               {prepList.map(item => (
                 <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
-                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => toggleFilterPrep(item.id)}>
+                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setPrepList(prepList.map(p => p.id === item.id ? {...p, done: !p.done} : p))}>
                     <span className={`text-sm ${item.done ? 'line-through text-gray-400' : 'font-medium'}`}>
                       {item.done ? '✅' : '⬜'} {item.text}
                     </span>
                   </div>
-                  <button onClick={() => deletePrepItem(item.id)} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
+                  <button onClick={() => setPrepList(prepList.filter(p => p.id !== item.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
+        {/* TAB 3: 購買清單 */}
         {activeTab === 'shopping' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增想買伴手禮</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人裝置</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="p-2 text-xs border rounded-xl" />
                 <input type="text" placeholder="購買地點" value={newShopTarget} onChange={e => setNewShopTarget(e.target.value)} className="p-2 text-xs border rounded-xl" />
               </div>
-              <button onClick={addShoppingItem} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+              <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]); setNewShopName(''); setNewShopTarget(''); }} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                 新增至清單
               </button>
             </div>
@@ -871,19 +688,20 @@ function App() {
               <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🛍️ 個人購物清單</h2>
               {shoppingList.map(s => (
                 <div key={s.id} className="p-3 bg-white border border-gray-100 rounded-xl flex justify-between items-center">
-                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => toggleShopping(s.id)}>
+                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? {...item, bought: !item.bought} : item))}>
                     <div>
                       <div className={`font-bold text-sm ${s.bought ? 'line-through text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</div>
                       <div className="text-xs text-gray-400">地點：{s.target}</div>
                     </div>
                   </div>
-                  <button onClick={() => deleteShoppingItem(s.id)} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
+                  <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
+        {/* TAB 4: 行程花費 */}
         {activeTab === 'expenses' && (
           <div className="space-y-4">
             {isEditMode && (
@@ -966,6 +784,7 @@ function App() {
 
       </main>
 
+      {/* 實體備份 Modal */}
       {showBackupModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -973,26 +792,6 @@ function App() {
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>⚙️ 實體備份與備用匯入</h3>
               <button onClick={() => setShowBackupModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
-
-            {!USE_CLAUDE_STORAGE && (
-              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
-                <div className="text-[10px] font-bold text-amber-900">🔗 共用同步網址</div>
-                {cloudIdRef.current ? (
-                  <>
-                    <div className="text-[10px] break-all font-mono text-slate-600">{window.location.href}</div>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(window.location.href); showToast('📋 網址已複製'); }}
-                      className="w-full py-1.5 text-[10px] font-bold text-white rounded-lg cursor-pointer"
-                      style={{ backgroundColor: THEME.accent }}
-                    >
-                      複製目前網址（分享給同行的人）
-                    </button>
-                  </>
-                ) : (
-                  <div className="text-[10px] text-amber-800">尚未連上雲端，稍後再試一次</div>
-                )}
-              </div>
-            )}
 
             <button onClick={handleExportData} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs shadow hover:bg-slate-700 cursor-pointer">
               📋 一鍵複製完整行程花費 (JSON)
@@ -1014,6 +813,7 @@ function App() {
         </div>
       )}
 
+      {/* 編輯景點 Modal */}
       {editingSpot && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -1039,6 +839,7 @@ function App() {
         </div>
       )}
 
+      {/* 新增景點 Modal */}
       {showAddSpotModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -1064,6 +865,7 @@ function App() {
         </div>
       )}
 
+      {/* 新增花費 Modal */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -1109,6 +911,7 @@ function App() {
         </div>
       )}
 
+      {/* 編輯花費 Modal */}
       {editingExpense && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -1137,7 +940,7 @@ function App() {
                         if (e.target.checked) {
                           setEditingExpense({ ...editingExpense, splitFor: [...editingExpense.splitFor, m] });
                         } else {
-                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter(x => x !== m) });
+                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter((x: string) => x !== m) });
                         }
                       }}
                       className="rounded text-amber-800 focus:ring-amber-800"
@@ -1154,6 +957,7 @@ function App() {
         </div>
       )}
 
+      {/* 底部 Tab */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40">
         <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[11px]">
           {[
@@ -1178,11 +982,8 @@ function App() {
   );
 }
 
+// 渲染安裝
 const rootElement = document.getElementById('root');
 if (rootElement) {
   ReactDOM.createRoot(rootElement).render(<App />);
 }
-
-</script>
-</body>
-</html>
