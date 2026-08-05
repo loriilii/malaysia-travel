@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
 const THEME = {
@@ -8,8 +8,7 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// ☁️ 全球雲端實時同步端點 (JSONBlob 開放式連線)
-const JSON_BLOB_API = "https://jsonblob.com/api/jsonBlob/1272000000000000000";
+const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -99,7 +98,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // ☁️ 雲端跨手機連線同步 State
+  // ☁️ 雲端狀態
+  const [blobId, setBlobId] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
+  const [lastSyncTime, setLastSyncTime] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
+
   const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
   const [members, setMembers] = useState(['我', '成員A', '成員B']);
   const [expenses, setExpenses] = useState([
@@ -107,9 +111,6 @@ export default function App() {
     { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' },
     { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
   ]);
-
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState('');
 
   // 📱 個人手機裝置儲存 State (localStorage)
   const [prepList, setPrepList] = useState(() => {
@@ -121,7 +122,7 @@ export default function App() {
     ];
   });
   const [newPrepText, setNewPrepText] = useState('');
-  const [newPrepCat, setNewPrepCat] = useState('個人物品');
+  const [newPrepCat] = useState('個人物品');
 
   const [shoppingList, setShoppingList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_shopping');
@@ -136,11 +137,16 @@ export default function App() {
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // ☁️ 全球雲端同步 (JSONBlob REST API)
-  const pullCloudData = async () => {
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  // ☁️ 核心雲端連線引擎：自動偵測、建立與讀取
+  const fetchCloudData = async (targetBlobId: string) => {
     try {
-      setIsSyncing(true);
-      const res = await fetch(JSON_BLOB_API, {
+      setSyncStatus('syncing');
+      const res = await fetch(`${JSON_BLOB_BASE}/${targetBlobId}`, {
         headers: { 'Accept': 'application/json' },
         cache: 'no-cache'
       });
@@ -149,25 +155,69 @@ export default function App() {
         if (cloudData.itinerary) setItinerary(cloudData.itinerary);
         if (cloudData.expenses) setExpenses(cloudData.expenses);
         if (cloudData.members) setMembers(cloudData.members);
-        setLastSyncTime(new Date().toLocaleTimeString());
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        return true;
       }
     } catch (e) {
-      console.log('Cloud sync fetch error', e);
-    } finally {
-      setIsSyncing(false);
+      console.error('Fetch cloud data failed:', e);
     }
+    setSyncStatus('error');
+    return false;
+  };
+
+  const createCloudBlob = async () => {
+    try {
+      setSyncStatus('syncing');
+      const payload = {
+        itinerary: MASTER_ITINERARY,
+        expenses,
+        members,
+        updatedAt: Date.now()
+      };
+      const res = await fetch(JSON_BLOB_BASE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const location = res.headers.get('Location');
+      if (location) {
+        const newId = location.split('/').pop();
+        if (newId) {
+          setBlobId(newId);
+          localStorage.setItem('my_trip_blob_id', newId);
+          window.location.hash = `blob=${newId}`;
+          setSyncStatus('success');
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          return newId;
+        }
+      }
+    } catch (e) {
+      console.error('Create cloud blob failed:', e);
+    }
+    setSyncStatus('error');
+    return null;
   };
 
   const pushCloudData = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
+    let activeId = blobId;
+    if (!activeId) {
+      activeId = await createCloudBlob();
+      if (!activeId) return;
+    }
+
     try {
-      setIsSyncing(true);
+      setSyncStatus('syncing');
       const payload = {
         itinerary: newItinerary || itinerary,
         expenses: newExpenses || expenses,
         members: newMembers || members,
         updatedAt: Date.now()
       };
-      await fetch(JSON_BLOB_API, {
+      const res = await fetch(`${JSON_BLOB_BASE}/${activeId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -175,27 +225,70 @@ export default function App() {
         },
         body: JSON.stringify(payload)
       });
-      setLastSyncTime(new Date().toLocaleTimeString());
+
+      if (res.ok) {
+        setSyncStatus('success');
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      } else {
+        setSyncStatus('error');
+      }
     } catch (e) {
-      console.log('Cloud sync push error', e);
-    } finally {
-      setIsSyncing(false);
+      console.error('Push cloud data error:', e);
+      setSyncStatus('error');
     }
   };
 
-  // 初始化並設定手機喚醒時「自動同步最新雲端資料」
+  // 網頁載入時初始化連線
   useEffect(() => {
-    pullCloudData();
+    const initSync = async () => {
+      // 1. 優先從網址 URL Hash 拿 Blob ID (例如友人打開分享連結)
+      const hash = window.location.hash;
+      let targetId = hash.includes('#blob=') ? hash.replace('#blob=', '').trim() : null;
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        pullCloudData();
+      // 2. 次之從 LocalStorage 拿 Blob ID
+      if (!targetId) {
+        targetId = localStorage.getItem('my_trip_blob_id');
       }
+
+      if (targetId) {
+        const success = await fetchCloudData(targetId);
+        if (success) {
+          setBlobId(targetId);
+          localStorage.setItem('my_trip_blob_id', targetId);
+          window.location.hash = `blob=${targetId}`;
+          return;
+        }
+      }
+
+      // 3. 都沒有就建立全新雲端房間
+      await createCloudBlob();
     };
 
+    initSync();
+
+    // 📱 當使用者切換回此網頁時，自動重新抓取最新雲端資料
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && blobId) {
+        fetchCloudData(blobId);
+      }
+    };
     window.addEventListener('visibilitychange', handleVisibilityChange);
     return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
+
+  // 複製分享連結給朋友
+  const handleCopyShareLink = () => {
+    if (!blobId) {
+      alert('雲端連線建立中，請稍後再試');
+      return;
+    }
+    const shareUrl = `${window.location.origin}${window.location.pathname}#blob=${blobId}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      showToast('📋 已複製同行同步連結！發送給朋友即可同步');
+    }).catch(() => {
+      prompt('請手動複製以下網址傳給同行朋友：', shareUrl);
+    });
+  };
 
   // 🌤️ 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
@@ -242,7 +335,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 1. 行程順序調整 (電腦拖曳 + 手機上下按鈕)
+  // 1. 行程順序調整 (低調極簡按鈕 + 拖曳)
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
@@ -385,16 +478,38 @@ export default function App() {
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
       
+      {/* Toast 提示訊息 */}
+      {toastMsg && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Header */}
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
-            <button onClick={pullCloudData} className="text-[10px] bg-white/20 px-2.5 py-0.5 rounded-full hover:bg-white/30 text-amber-200 flex items-center font-medium">
-              {isSyncing ? '🔄 同步中...' : `☁️ 連線同步 ${lastSyncTime}`}
+            <button
+              onClick={() => blobId && fetchCloudData(blobId)}
+              className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition"
+              title="點擊強制重新整理雲端資料"
+            >
+              <span>
+                {syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}
+              </span>
+              <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? `已同步 ${lastSyncTime}` : '同步失敗'}</span>
             </button>
           </div>
-          <p className="text-xs" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+          <div className="flex items-center space-x-2 mt-0.5">
+            <p className="text-xs" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+            <button
+              onClick={handleCopyShareLink}
+              className="text-[10px] text-amber-200 hover:text-amber-100 underline font-medium"
+            >
+              📋 複製同行同步連結
+            </button>
+          </div>
         </div>
 
         <button
@@ -403,7 +518,7 @@ export default function App() {
             isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
           }`}
         >
-          {isEditMode ? '✏️ 編輯模式 (開啟中)' : '👁️ 瀏覽模式 (唯讀)'}
+          {isEditMode ? '✏️ 編輯模式' : '👁️ 唯讀模式'}
         </button>
       </header>
 
@@ -467,7 +582,7 @@ export default function App() {
                   onDragStart={(e) => handleDragStart(e, index)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, index)}
-                  className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-amber-900/10 transition ${isEditMode ? 'ring-2 ring-amber-400/40' : ''}`}
+                  className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-amber-900/10 transition ${isEditMode ? 'ring-1 ring-slate-300' : ''}`}
                 >
                   {spot.img && (
                     <div className="h-36 w-full overflow-hidden relative">
@@ -482,30 +597,37 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 📱 編輯模式下顯示「手機微調按鈕」與「刪除按鈕」 */}
+                      {/* 📱 編輯模式下：低調質感的微調控制組 */}
                       {isEditMode && (
-                        <div className="flex items-center space-x-1 bg-amber-50 p-1 rounded-lg border border-amber-200">
+                        <div className="flex items-center space-x-1">
                           <button
                             onClick={() => handleMoveSpot(index, 'up')}
                             disabled={index === 0}
-                            className="px-2 py-0.5 bg-white rounded border border-gray-200 text-xs font-bold disabled:opacity-30"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition"
                             title="向上移動"
                           >
-                            ⬆️
+                            ▲
                           </button>
                           <button
                             onClick={() => handleMoveSpot(index, 'down')}
                             disabled={index === itinerary[selectedDayIdx].items.length - 1}
-                            className="px-2 py-0.5 bg-white rounded border border-gray-200 text-xs font-bold disabled:opacity-30"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition"
                             title="向下移動"
                           >
-                            ⬇️
+                            ▼
                           </button>
-                          <button onClick={() => setEditingSpot(spot)} className="text-xs text-amber-800 font-bold px-2 py-0.5 bg-white rounded border border-amber-200">
-                            ✏️ 編輯
+                          <button
+                            onClick={() => setEditingSpot(spot)}
+                            className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition"
+                          >
+                            編輯
                           </button>
-                          <button onClick={() => handleDeleteSpot(spot.id)} className="text-xs text-red-600 font-bold px-1.5 py-0.5 bg-white rounded border border-red-200">
-                            🗑️
+                          <button
+                            onClick={() => handleDeleteSpot(spot.id)}
+                            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded text-xs border border-gray-200 transition"
+                            title="刪除"
+                          >
+                            ✕
                           </button>
                         </div>
                       )}
