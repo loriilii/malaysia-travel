@@ -1,4 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>馬來西亞 8天7夜</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #F3ECDE; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
 
 const THEME = {
   primary: '#183451',
@@ -6,12 +25,6 @@ const THEME = {
   bg: '#F3ECDE',
   sand: '#D4AF83'
 };
-
-// 共用資料的 key（所有裝置共用同一份）
-const TRIP_DATA_KEY = 'trip-data';
-// 個人資料的 key（僅存於這個瀏覽器/裝置）
-const PREP_LIST_KEY = 'prep-list';
-const SHOPPING_LIST_KEY = 'shopping-list';
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -112,7 +125,31 @@ const DEFAULT_SHOPPING_LIST = [
   { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
 ];
 
-export default function App() {
+// ── 儲存層設定 ─────────────────────────────────────────────
+// 在 Claude 對話框裡開啟 Artifact 時，window.storage 會自動存在，直接用它（不需任何設定）。
+// 自行架站 / 直接打開 HTML 檔時，window.storage 不存在，改用 jsonblob.com + 網址參數，
+// 讓「同一個網址」的所有裝置都讀寫同一份資料。
+const USE_CLAUDE_STORAGE = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+const JSON_BLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
+const TRIP_DATA_KEY = 'trip-data';
+const PREP_LIST_KEY = 'my_malaysia_prep';
+const SHOPPING_LIST_KEY = 'my_malaysia_shopping';
+
+function getTripIdFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get('tripId') || '';
+  } catch (e) { return ''; }
+}
+
+function setTripIdInUrl(id) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tripId', id);
+    window.history.replaceState({}, '', url.toString());
+  } catch (e) {}
+}
+
+function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
@@ -130,8 +167,12 @@ export default function App() {
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   const [isReady, setIsReady] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [showShareBanner, setShowShareBanner] = useState(false);
 
   const hasLoadedOnce = useRef(false);
+  const cloudIdRef = useRef(getTripIdFromUrl());
+  const creatingRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -142,52 +183,101 @@ export default function App() {
   const isValidItinerary = (val) =>
     Array.isArray(val) && val.length > 0 && val.every(d => d && Array.isArray(d.items));
 
+  // 確保有一個共用的雲端代碼（jsonblob 模式專用）：若還沒有，用目前資料建立一份，
+  // 並把代碼寫進網址列，之後把這個網址分享/收藏給同行的人即可跨裝置同步
+  const ensureCloudId = async (initialPayload) => {
+    if (cloudIdRef.current) return cloudIdRef.current;
+    if (creatingRef.current) return creatingRef.current;
+    creatingRef.current = (async () => {
+      try {
+        const createRes = await fetch(JSON_BLOB_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(initialPayload)
+        });
+        const location = createRes.headers.get('Location');
+        const id = location ? location.split('/').pop() : null;
+        if (id) {
+          cloudIdRef.current = id;
+          setTripIdInUrl(id);
+          setShareUrl(window.location.href);
+          setShowShareBanner(true);
+        }
+        return id;
+      } catch (e) {
+        console.error('建立雲端資料失敗', e);
+        return null;
+      } finally {
+        creatingRef.current = null;
+      }
+    })();
+    return creatingRef.current;
+  };
+
   // 讀取共用行程資料
   const pullTripData = async (isManualRetry = false) => {
     setSyncStatus('syncing');
     try {
-      const result = await window.storage.get(TRIP_DATA_KEY, true);
-      if (result && result.value) {
-        const cloudObj = JSON.parse(result.value);
-
-        if (isValidItinerary(cloudObj.itinerary)) {
-          setItinerary(cloudObj.itinerary);
-          setSelectedDayIdx(prev => Math.min(prev, cloudObj.itinerary.length - 1));
-        } else if (cloudObj.itinerary) {
-          console.warn('雲端 itinerary 格式不正確，改用預設行程', cloudObj.itinerary);
-          showToast('⚠️ 雲端行程資料格式異常，已改用預設行程顯示');
-        }
-
-        if (Array.isArray(cloudObj.expenses)) setExpenses(cloudObj.expenses);
-        if (Array.isArray(cloudObj.members) && cloudObj.members.length > 0) setMembers(cloudObj.members);
-
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncTime(timeStr);
-        setSyncStatus('success');
-        if (isManualRetry) {
-          const dayCount = isValidItinerary(cloudObj.itinerary) ? cloudObj.itinerary.length : itinerary.length;
-          alert(`🟢 雲端連線正常\n\n- 行程天數：${dayCount} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
+      if (USE_CLAUDE_STORAGE) {
+        const result = await window.storage.get(TRIP_DATA_KEY, true);
+        if (result && result.value) {
+          applyCloudPayload(JSON.parse(result.value), isManualRetry);
+        } else {
+          markSynced();
         }
       } else {
-        // 雲端還沒有資料，代表這是第一次使用，用預設值建立一份
-        setSyncStatus('success');
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncTime(timeStr);
+        const id = cloudIdRef.current;
+        if (!id) {
+          // 這個網址還沒有連結任何共用行程，用目前畫面上的資料建立一份新的
+          await ensureCloudId({ itinerary, expenses, members, updatedAt: Date.now() });
+          markSynced();
+        } else {
+          const res = await fetch(`${JSON_BLOB_BASE}/${id}`, { cache: 'no-cache' });
+          if (res.ok) {
+            const cloudObj = await res.json();
+            applyCloudPayload(cloudObj, isManualRetry);
+          } else {
+            setSyncStatus('error');
+            if (isManualRetry) alert('🔴 網址裡的雲端代碼已失效或找不到資料，請確認網址是否正確。');
+          }
+        }
       }
     } catch (err) {
-      // key 不存在時 get 會 throw，這代表雲端尚未初始化，不算錯誤；解析失敗才是真正的問題
       if (err instanceof SyntaxError) {
         console.error('雲端資料 JSON 解析失敗', err);
         showToast('⚠️ 雲端資料損毀，已改用目前畫面上的版本');
+      } else {
+        console.error('Pull trip data error:', err);
       }
-      setSyncStatus('success');
-      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setLastSyncTime(timeStr);
+      markSynced();
     }
     return true;
   };
 
-  // 寫入共用行程資料（所有裝置共用同一份 key，寫入後其他裝置下次讀取就會拿到最新版本）
+  const applyCloudPayload = (cloudObj, isManualRetry) => {
+    if (isValidItinerary(cloudObj.itinerary)) {
+      setItinerary(cloudObj.itinerary);
+      setSelectedDayIdx(prev => Math.min(prev, cloudObj.itinerary.length - 1));
+    } else if (cloudObj.itinerary) {
+      console.warn('雲端 itinerary 格式不正確，改用預設行程', cloudObj.itinerary);
+      showToast('⚠️ 雲端行程資料格式異常，已改用預設行程顯示');
+    }
+    if (Array.isArray(cloudObj.expenses)) setExpenses(cloudObj.expenses);
+    if (Array.isArray(cloudObj.members) && cloudObj.members.length > 0) setMembers(cloudObj.members);
+    markSynced();
+    if (isManualRetry) {
+      const dayCount = isValidItinerary(cloudObj.itinerary) ? cloudObj.itinerary.length : itinerary.length;
+      alert(`🟢 雲端連線正常\n\n- 行程天數：${dayCount} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆`);
+    }
+  };
+
+  const markSynced = () => {
+    setSyncStatus('success');
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setLastSyncTime(timeStr);
+  };
+
+  // 寫入共用行程資料
   const pushTripData = async (newItinerary, newExpenses, newMembers) => {
     const targetItinerary = newItinerary || itinerary;
     const targetExpenses = newExpenses || expenses;
@@ -198,17 +288,37 @@ export default function App() {
     setMembers(targetMembers);
 
     setSyncStatus('syncing');
+    const payload = { itinerary: targetItinerary, expenses: targetExpenses, members: targetMembers, updatedAt: Date.now() };
+
     try {
-      const payload = { itinerary: targetItinerary, expenses: targetExpenses, members: targetMembers, updatedAt: Date.now() };
-      const result = await window.storage.set(TRIP_DATA_KEY, JSON.stringify(payload), true);
-      if (result) {
-        setSyncStatus('success');
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncTime(timeStr);
-        showToast('☁️ 已同步至雲端，其他裝置下次開啟即可看到最新版本');
+      if (USE_CLAUDE_STORAGE) {
+        const result = await window.storage.set(TRIP_DATA_KEY, JSON.stringify(payload), true);
+        if (result) {
+          markSynced();
+          showToast('☁️ 已同步至雲端，其他裝置下次開啟即可看到最新版本');
+        } else {
+          setSyncStatus('error');
+          showToast('⚠️ 同步失敗，請點右上角重試');
+        }
       } else {
-        setSyncStatus('error');
-        showToast('⚠️ 同步失敗，請點右上角重試');
+        const id = await ensureCloudId(payload);
+        if (!id) {
+          setSyncStatus('error');
+          showToast('⚠️ 同步失敗，請檢查網路連線後點右上角重試');
+          return;
+        }
+        const res = await fetch(`${JSON_BLOB_BASE}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          markSynced();
+          showToast('☁️ 已同步至雲端，用同一個網址開啟的裝置都會看到最新版本');
+        } else {
+          setSyncStatus('error');
+          showToast('⚠️ 同步失敗，請點右上角重試');
+        }
       }
     } catch (err) {
       console.error('Push trip data error:', err);
@@ -217,26 +327,43 @@ export default function App() {
     }
   };
 
-  // 個人清單：讀取
+  // 個人清單：讀取（Claude 環境用 window.storage，自架環境用 localStorage，僅存於此裝置）
   const loadPersonalLists = async () => {
-    try {
-      const prepResult = await window.storage.get(PREP_LIST_KEY, false);
-      if (prepResult && prepResult.value) setPrepList(JSON.parse(prepResult.value));
-    } catch (e) { /* key 尚不存在，使用預設值 */ }
-    try {
-      const shopResult = await window.storage.get(SHOPPING_LIST_KEY, false);
-      if (shopResult && shopResult.value) setShoppingList(JSON.parse(shopResult.value));
-    } catch (e) { /* key 尚不存在，使用預設值 */ }
+    if (USE_CLAUDE_STORAGE) {
+      try {
+        const prepResult = await window.storage.get(PREP_LIST_KEY, false);
+        if (prepResult && prepResult.value) setPrepList(JSON.parse(prepResult.value));
+      } catch (e) { /* key 尚不存在，使用預設值 */ }
+      try {
+        const shopResult = await window.storage.get(SHOPPING_LIST_KEY, false);
+        if (shopResult && shopResult.value) setShoppingList(JSON.parse(shopResult.value));
+      } catch (e) { /* key 尚不存在，使用預設值 */ }
+    } else {
+      try {
+        const saved = localStorage.getItem(PREP_LIST_KEY);
+        if (saved) setPrepList(JSON.parse(saved));
+      } catch (e) {}
+      try {
+        const saved = localStorage.getItem(SHOPPING_LIST_KEY);
+        if (saved) setShoppingList(JSON.parse(saved));
+      } catch (e) {}
+    }
   };
 
   const savePrepList = async (list) => {
     setPrepList(list);
-    try { await window.storage.set(PREP_LIST_KEY, JSON.stringify(list), false); } catch (e) { console.error(e); }
+    try {
+      if (USE_CLAUDE_STORAGE) await window.storage.set(PREP_LIST_KEY, JSON.stringify(list), false);
+      else localStorage.setItem(PREP_LIST_KEY, JSON.stringify(list));
+    } catch (e) { console.error(e); }
   };
 
   const saveShoppingList = async (list) => {
     setShoppingList(list);
-    try { await window.storage.set(SHOPPING_LIST_KEY, JSON.stringify(list), false); } catch (e) { console.error(e); }
+    try {
+      if (USE_CLAUDE_STORAGE) await window.storage.set(SHOPPING_LIST_KEY, JSON.stringify(list), false);
+      else localStorage.setItem(SHOPPING_LIST_KEY, JSON.stringify(list));
+    } catch (e) { console.error(e); }
   };
 
   // 開機讀取，並在切回前景時重新拉取共用資料（模擬跨裝置同步）
@@ -518,6 +645,27 @@ export default function App() {
       {toastMsg && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50">
           {toastMsg}
+        </div>
+      )}
+
+      {showShareBanner && !USE_CLAUDE_STORAGE && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
+            <div className="text-2xl">🔗</div>
+            <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>行程已建立！請用這個網址分享同步</h3>
+            <p className="text-xs text-gray-600">把下面這個網址加到書籤，或傳給同行的家人朋友。<b>大家都要用這個網址</b>打開，資料才會即時同步，不能各自用原本的網址。</p>
+            <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] break-all font-mono text-slate-700">{shareUrl}</div>
+            <button
+              onClick={() => { navigator.clipboard.writeText(shareUrl); showToast('📋 網址已複製'); }}
+              className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer"
+              style={{ backgroundColor: THEME.accent }}
+            >
+              📋 複製網址
+            </button>
+            <button onClick={() => setShowShareBanner(false)} className="w-full py-2 text-xs font-bold text-slate-500 rounded-lg cursor-pointer">
+              我知道了，先關閉
+            </button>
+          </div>
         </div>
       )}
 
@@ -826,6 +974,26 @@ export default function App() {
               <button onClick={() => setShowBackupModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
 
+            {!USE_CLAUDE_STORAGE && (
+              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+                <div className="text-[10px] font-bold text-amber-900">🔗 共用同步網址</div>
+                {cloudIdRef.current ? (
+                  <>
+                    <div className="text-[10px] break-all font-mono text-slate-600">{window.location.href}</div>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(window.location.href); showToast('📋 網址已複製'); }}
+                      className="w-full py-1.5 text-[10px] font-bold text-white rounded-lg cursor-pointer"
+                      style={{ backgroundColor: THEME.accent }}
+                    >
+                      複製目前網址（分享給同行的人）
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-[10px] text-amber-800">尚未連上雲端，稍後再試一次</div>
+                )}
+              </div>
+            )}
+
             <button onClick={handleExportData} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs shadow hover:bg-slate-700 cursor-pointer">
               📋 一鍵複製完整行程花費 (JSON)
             </button>
@@ -1009,3 +1177,12 @@ export default function App() {
     </div>
   );
 }
+
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(<App />);
+}
+
+</script>
+</body>
+</html>
