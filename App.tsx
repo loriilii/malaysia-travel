@@ -8,9 +8,9 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
-const LOCAL_STORAGE_KEY = "MY_MALAYSIA_TRIP_MASTER_DATA_V4";
-const STORED_BLOB_ID_KEY = "MY_MALAYSIA_TRIP_BLOB_ID_V4";
+// ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
+const FIXED_FIREBASE_URL = "https://trip-app-malaysia-default-rtdb.firebaseio.com/master_trip.json";
+const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -100,9 +100,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 1. 本地 State
+  // 1. React 狀態（從 LocalStorage 快存啟動，絕不白屏）
   const [itinerary, setItinerary] = useState(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
     if (saved) {
       try { return JSON.parse(saved).itinerary || MASTER_ITINERARY; } catch (e) {}
     }
@@ -110,7 +110,7 @@ export default function App() {
   });
 
   const [members, setMembers] = useState<string[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
     if (saved) {
       try { return JSON.parse(saved).members || ['我', '成員A', '成員B']; } catch (e) {}
     }
@@ -118,7 +118,7 @@ export default function App() {
   });
 
   const [expenses, setExpenses] = useState<any[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
     if (saved) {
       try {
         return JSON.parse(saved).expenses || [
@@ -133,7 +133,7 @@ export default function App() {
     ];
   });
 
-  // ☁️ 雲端狀態
+  // ☁️ 雲端狀態與提示
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
@@ -171,90 +171,51 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // 🛠️ 自我修復式雲端連線引擎 (自動建立資料庫，100% 告別 404)
-  const getOrCreateValidCloudBlobId = async () => {
-    let currentId = localStorage.getItem(STORED_BLOB_ID_KEY);
-
-    // 1. 先測試既有的 Blob ID 是否可用
-    if (currentId) {
-      try {
-        const checkRes = await fetch(`${JSON_BLOB_BASE}/${currentId}`, { cache: 'no-cache' });
-        if (checkRes.ok) return currentId;
-      } catch (e) {}
-    }
-
-    // 2. 若不存在或回傳 404，自動在背景建庫
+  // ☁️ 100% 全球同一通道 Firebase 雲端讀取
+  const pullFromCloud = async (isManualRetry = false) => {
+    setSyncStatus('syncing');
     try {
-      const payload = {
-        itinerary,
-        expenses,
-        members,
-        updatedAt: Date.now()
-      };
-      const createRes = await fetch(JSON_BLOB_BASE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const location = createRes.headers.get('Location');
-      if (location) {
-        const newId = location.split('/').pop();
-        if (newId) {
-          localStorage.setItem(STORED_BLOB_ID_KEY, newId);
-          return newId;
+      const res = await fetch(FIXED_FIREBASE_URL, { cache: 'no-cache' });
+      if (res.ok) {
+        const cloudObj = await res.json();
+        if (cloudObj && cloudObj.itinerary) {
+          setItinerary(cloudObj.itinerary);
+          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+          if (cloudObj.members) setMembers(cloudObj.members);
+
+          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
+          setSyncStatus('success');
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSyncTime(timeStr);
+
+          if (isManualRetry) {
+            alert(`🟢 全球雲端連線成功！\n\n- 通道：Google Firebase 固定端點\n- 最新同步時間：${timeStr}\n- 雲端行程天數：${cloudObj.itinerary.length} 天\n- 雲端花費筆數：${(cloudObj.expenses || []).length} 筆\n\n其他同行手機只要整理網頁，即可看到此最新數據！`);
+          }
+          return true;
+        } else if (cloudObj === null) {
+          // 如果雲端尚未有資料，把本地預設行程推上去初始化
+          await pushToCloud(itinerary, expenses, members);
+          return true;
         }
       }
     } catch (e) {
-      console.error('Create blob failed:', e);
-    }
-    return null;
-  };
-
-  // 拉取雲端資料
-  const pullFromCloud = async (isManualRetry = false) => {
-    setSyncStatus('syncing');
-    const validBlobId = await getOrCreateValidCloudBlobId();
-
-    if (validBlobId) {
-      try {
-        const res = await fetch(`${JSON_BLOB_BASE}/${validBlobId}`, { cache: 'no-cache' });
-        if (res.ok) {
-          const cloudObj = await res.json();
-          if (cloudObj && cloudObj.itinerary) {
-            setItinerary(cloudObj.itinerary);
-            if (cloudObj.expenses) setExpenses(cloudObj.expenses);
-            if (cloudObj.members) setMembers(cloudObj.members);
-
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudObj));
-            setSyncStatus('success');
-            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setLastSyncTime(timeStr);
-
-            if (isManualRetry) {
-              alert(`🟢 雲端連線診斷成功！\n\n- 連線狀態：正常 (200 OK)\n- 雲端通道 ID：${validBlobId}\n- 行程天數：${cloudObj.itinerary.length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
-            }
-            return true;
-          }
-        }
-      } catch (e) {
-        console.error('Pull cloud error:', e);
-      }
+      console.error('Pull cloud error:', e);
     }
 
     setSyncStatus('error');
     if (isManualRetry) {
-      alert('🔴 雲端連線失敗，已自動啟用離線模式。\n💡 您的修改已儲存在手機內，連線恢復時將自動同步。');
+      alert('🔴 雲端連線失敗，已自動啟用手機本地快存。\n💡 請檢查手機網路，連線恢復時將自動同步。');
     }
     return false;
   };
 
-  // 推送資料至雲端
+  // ☁️ 100% 全球同一通道 Firebase 雲端寫入 (PUT)
   const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
     const targetItinerary = newItinerary || itinerary;
     const targetExpenses = newExpenses || expenses;
     const targetMembers = newMembers || members;
 
-    // 1. 更新本地 State
+    // 1. 先更新本地 State 與備份
     if (newItinerary) setItinerary(newItinerary);
     if (newExpenses) setExpenses(newExpenses);
     if (newMembers) setMembers(newMembers);
@@ -265,36 +226,32 @@ export default function App() {
       members: targetMembers,
       updatedAt: Date.now()
     };
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
 
-    // 2. 推送雲端
+    // 2. 直連推送到全團唯一的 Firebase 雲端點
     setSyncStatus('syncing');
-    const validBlobId = await getOrCreateValidCloudBlobId();
+    try {
+      const res = await fetch(FIXED_FIREBASE_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    if (validBlobId) {
-      try {
-        const res = await fetch(`${JSON_BLOB_BASE}/${validBlobId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          setSyncStatus('success');
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          setLastSyncTime(timeStr);
-          showToast('☁️ 已即時同步至雲端！');
-          return;
-        }
-      } catch (e) {
-        console.error('Push cloud error:', e);
+      if (res.ok) {
+        setSyncStatus('success');
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(timeStr);
+        showToast('☁️ 已即時同步至全團共享雲端！');
+        return;
       }
+    } catch (e) {
+      console.error('Push cloud error:', e);
     }
 
     setSyncStatus('error');
   };
 
-  // 開機自動診斷並同步
+  // 網頁開啟時 + 切換視窗時自動抓取全團最新雲端資料
   useEffect(() => {
     pullFromCloud(false);
 
@@ -350,7 +307,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 行程順序調整
+  // 行程順序微調
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
@@ -493,7 +450,7 @@ export default function App() {
       const parsed = JSON.parse(importJsonText);
       if (parsed && parsed.itinerary) {
         pushToCloud(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
-        alert('🟢 成功匯入資料並同步至雲端！');
+        alert('🟢 成功匯入資料並同步至全團雲端！');
         setShowBackupModal(false);
         setImportJsonText('');
       } else {
@@ -523,17 +480,17 @@ export default function App() {
             <button
               onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制進行雲端連線診斷"
+              title="點擊強制拉取全團最新雲端資料"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
-              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `全團同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
 
             <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
               ⚙️
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (Firebase 直連中心)</p>
         </div>
 
         <button
@@ -621,7 +578,7 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 編輯模式：微調控制按鈕 */}
+                      {/* 編輯模式：微調控制 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
