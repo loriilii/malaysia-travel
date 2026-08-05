@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 
 const THEME = {
@@ -8,7 +8,11 @@ const THEME = {
   sand: '#D4AF83'
 };
 
+// 雲端連線端點
 const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
+// 全團固定共享金鑰 (保證所有人打開主網址都連到同一個雲端資料庫)
+const GLOBAL_APP_KEY = "MY_MALAYSIA_TRIP_2026_SHARED_MASTER_KEY_V2";
+const KEY_VAL_API = `https://keyvalue.immanuel.co/api/KeyVal`;
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -102,7 +106,6 @@ export default function App() {
   const [blobId, setBlobId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
-  const [toastMsg, setToastMsg] = useState('');
 
   const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
   const [members, setMembers] = useState(['我', '成員A', '成員B']);
@@ -112,7 +115,7 @@ export default function App() {
     { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
   ]);
 
-  // 📱 個人手機裝置儲存 State (localStorage)
+  // 📱 個人手機獨立清單 (localStorage)
   const [prepList, setPrepList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_prep');
     return saved ? JSON.parse(saved) : [
@@ -137,16 +140,52 @@ export default function App() {
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3000);
+  // ☁️ 全球固定金鑰自動尋找/建立邏輯
+  const getOrInitGlobalBlobId = async () => {
+    try {
+      // 1. 嘗試從全域註冊器讀取這個專案專屬的共享 ID
+      const res = await fetch(`${KEY_VAL_API}/GetValue/${GLOBAL_APP_KEY}/BLOB_ID`);
+      if (res.ok) {
+        const existingId = (await res.text()).replace(/"/g, '').trim();
+        if (existingId && existingId.length > 5 && existingId !== 'Null') {
+          return existingId;
+        }
+      }
+    } catch (e) {
+      console.log('Lookup global ID failed, creating new registry...');
+    }
+
+    // 2. 如果全域尚未建立，自動在雲端產生全新的共享 Blob
+    try {
+      const payload = { itinerary: MASTER_ITINERARY, expenses, members, updatedAt: Date.now() };
+      const createRes = await fetch(JSON_BLOB_BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const location = createRes.headers.get('Location');
+      if (location) {
+        const newId = location.split('/').pop();
+        if (newId) {
+          // 將產生的 ID 註冊到全域，這樣所有人開啟主網址都會連到此 ID
+          await fetch(`${KEY_VAL_API}/UpdateValue/${GLOBAL_APP_KEY}/BLOB_ID/${newId}`, { method: 'POST' });
+          return newId;
+        }
+      }
+    } catch (e) {
+      console.error('Create global blob failed:', e);
+    }
+    return null;
   };
 
-  // ☁️ 核心雲端連線引擎：自動偵測、建立與讀取
-  const fetchCloudData = async (targetBlobId: string) => {
+  // 從雲端拉取最新資料
+  const fetchCloudData = async (targetId?: string) => {
+    const activeId = targetId || blobId;
+    if (!activeId) return;
+
     try {
       setSyncStatus('syncing');
-      const res = await fetch(`${JSON_BLOB_BASE}/${targetBlobId}`, {
+      const res = await fetch(`${JSON_BLOB_BASE}/${activeId}`, {
         headers: { 'Accept': 'application/json' },
         cache: 'no-cache'
       });
@@ -157,56 +196,22 @@ export default function App() {
         if (cloudData.members) setMembers(cloudData.members);
         setSyncStatus('success');
         setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        return true;
+      } else {
+        setSyncStatus('error');
       }
     } catch (e) {
-      console.error('Fetch cloud data failed:', e);
+      console.error('Fetch cloud data error:', e);
+      setSyncStatus('error');
     }
-    setSyncStatus('error');
-    return false;
   };
 
-  const createCloudBlob = async () => {
-    try {
-      setSyncStatus('syncing');
-      const payload = {
-        itinerary: MASTER_ITINERARY,
-        expenses,
-        members,
-        updatedAt: Date.now()
-      };
-      const res = await fetch(JSON_BLOB_BASE, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-      const location = res.headers.get('Location');
-      if (location) {
-        const newId = location.split('/').pop();
-        if (newId) {
-          setBlobId(newId);
-          localStorage.setItem('my_trip_blob_id', newId);
-          window.location.hash = `blob=${newId}`;
-          setSyncStatus('success');
-          setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-          return newId;
-        }
-      }
-    } catch (e) {
-      console.error('Create cloud blob failed:', e);
-    }
-    setSyncStatus('error');
-    return null;
-  };
-
+  // 推送資料更新到雲端
   const pushCloudData = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
     let activeId = blobId;
     if (!activeId) {
-      activeId = await createCloudBlob();
-      if (!activeId) return;
+      activeId = await getOrInitGlobalBlobId();
+      if (activeId) setBlobId(activeId);
+      else return;
     }
 
     try {
@@ -238,57 +243,30 @@ export default function App() {
     }
   };
 
-  // 網頁載入時初始化連線
+  // 初始化：打開原本的網址即自動連接全團相同的雲端資料庫
   useEffect(() => {
-    const initSync = async () => {
-      // 1. 優先從網址 URL Hash 拿 Blob ID (例如友人打開分享連結)
-      const hash = window.location.hash;
-      let targetId = hash.includes('#blob=') ? hash.replace('#blob=', '').trim() : null;
-
-      // 2. 次之從 LocalStorage 拿 Blob ID
-      if (!targetId) {
-        targetId = localStorage.getItem('my_trip_blob_id');
+    const initApp = async () => {
+      setSyncStatus('syncing');
+      const masterId = await getOrInitGlobalBlobId();
+      if (masterId) {
+        setBlobId(masterId);
+        await fetchCloudData(masterId);
+      } else {
+        setSyncStatus('error');
       }
-
-      if (targetId) {
-        const success = await fetchCloudData(targetId);
-        if (success) {
-          setBlobId(targetId);
-          localStorage.setItem('my_trip_blob_id', targetId);
-          window.location.hash = `blob=${targetId}`;
-          return;
-        }
-      }
-
-      // 3. 都沒有就建立全新雲端房間
-      await createCloudBlob();
     };
 
-    initSync();
+    initApp();
 
-    // 📱 當使用者切換回此網頁時，自動重新抓取最新雲端資料
+    // 📱 手機切換回此畫面時自動更新
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && blobId) {
-        fetchCloudData(blobId);
+      if (document.visibilityState === 'visible') {
+        fetchCloudData();
       }
     };
     window.addEventListener('visibilitychange', handleVisibilityChange);
     return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
-
-  // 複製分享連結給朋友
-  const handleCopyShareLink = () => {
-    if (!blobId) {
-      alert('雲端連線建立中，請稍後再試');
-      return;
-    }
-    const shareUrl = `${window.location.origin}${window.location.pathname}#blob=${blobId}`;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      showToast('📋 已複製同行同步連結！發送給朋友即可同步');
-    }).catch(() => {
-      prompt('請手動複製以下網址傳給同行朋友：', shareUrl);
-    });
-  };
 
   // 🌤️ 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
@@ -335,7 +313,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 1. 行程順序調整 (低調極簡按鈕 + 拖曳)
+  // 行程順序微調 (極簡低調風格)
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
@@ -396,7 +374,7 @@ export default function App() {
     setShowAddSpotModal(false);
   };
 
-  // 2. 團員管理
+  // 團員管理
   const handleRenameMember = (oldName: string) => {
     const newName = prompt(`請輸入成員【${oldName}】的新名字：`, oldName);
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
@@ -428,7 +406,7 @@ export default function App() {
     }
   };
 
-  // 3. 花費管理
+  // 花費管理
   const handleOpenAddExpense = () => {
     setNewExpense({
       item: '',
@@ -478,38 +456,21 @@ export default function App() {
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
       
-      {/* Toast 提示訊息 */}
-      {toastMsg && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
-          {toastMsg}
-        </div>
-      )}
-
       {/* Header */}
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
             <button
-              onClick={() => blobId && fetchCloudData(blobId)}
+              onClick={() => fetchCloudData()}
               className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition"
-              title="點擊強制重新整理雲端資料"
+              title="點擊刷新最新資料"
             >
-              <span>
-                {syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}
-              </span>
-              <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? `已同步 ${lastSyncTime}` : '同步失敗'}</span>
+              <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
           </div>
-          <div className="flex items-center space-x-2 mt-0.5">
-            <p className="text-xs" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
-            <button
-              onClick={handleCopyShareLink}
-              className="text-[10px] text-amber-200 hover:text-amber-100 underline font-medium"
-            >
-              📋 複製同行同步連結
-            </button>
-          </div>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (全團共享連線中)</p>
         </div>
 
         <button
@@ -597,7 +558,7 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 📱 編輯模式下：低調質感的微調控制組 */}
+                      {/* 編輯模式下的精緻微調控制按鈕 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
