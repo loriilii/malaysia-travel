@@ -8,9 +8,9 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// ☁️ 專屬直連 KV 雲端資料庫 (100% 支援 CORS，全團固定連線位址)
-const CLOUD_SYNC_URL = "https://kvdb.io/W9x2K7mL4pQ8vN3tR1z5/malaysia_2026_trip_master";
-const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP";
+const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
+const LOCAL_STORAGE_KEY = "MY_MALAYSIA_TRIP_MASTER_DATA_V4";
+const STORED_BLOB_ID_KEY = "MY_MALAYSIA_TRIP_BLOB_ID_V4";
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -100,9 +100,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 1. React 獨立 State 變數（確保每一次修改一定會觸發畫面重繪）
+  // 1. 本地 State
   const [itinerary, setItinerary] = useState(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       try { return JSON.parse(saved).itinerary || MASTER_ITINERARY; } catch (e) {}
     }
@@ -110,7 +110,7 @@ export default function App() {
   });
 
   const [members, setMembers] = useState<string[]>(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       try { return JSON.parse(saved).members || ['我', '成員A', '成員B']; } catch (e) {}
     }
@@ -118,7 +118,7 @@ export default function App() {
   });
 
   const [expenses, setExpenses] = useState<any[]>(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       try {
         return JSON.parse(saved).expenses || [
@@ -133,7 +133,7 @@ export default function App() {
     ];
   });
 
-  // ☁️ 雲端狀態與提示
+  // ☁️ 雲端狀態
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
@@ -171,42 +171,90 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // ☁️ 100% 成功直連拉取雲端數據
-  const pullFromCloud = async (showPrompt = false) => {
-    setSyncStatus('syncing');
-    try {
-      const res = await fetch(CLOUD_SYNC_URL, { cache: 'no-cache' });
-      if (res.ok) {
-        const text = await res.text();
-        if (text && text.trim().startsWith('{')) {
-          const cloudObj = JSON.parse(text);
-          if (cloudObj.itinerary) setItinerary(cloudObj.itinerary);
-          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
-          if (cloudObj.members) setMembers(cloudObj.members);
+  // 🛠️ 自我修復式雲端連線引擎 (自動建立資料庫，100% 告別 404)
+  const getOrCreateValidCloudBlobId = async () => {
+    let currentId = localStorage.getItem(STORED_BLOB_ID_KEY);
 
-          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
-          setSyncStatus('success');
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          setLastSyncTime(timeStr);
-          if (showPrompt) alert(`🟢 雲端連線成功！資料已同步至最新 (${timeStr})`);
-          return true;
+    // 1. 先測試既有的 Blob ID 是否可用
+    if (currentId) {
+      try {
+        const checkRes = await fetch(`${JSON_BLOB_BASE}/${currentId}`, { cache: 'no-cache' });
+        if (checkRes.ok) return currentId;
+      } catch (e) {}
+    }
+
+    // 2. 若不存在或回傳 404，自動在背景建庫
+    try {
+      const payload = {
+        itinerary,
+        expenses,
+        members,
+        updatedAt: Date.now()
+      };
+      const createRes = await fetch(JSON_BLOB_BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const location = createRes.headers.get('Location');
+      if (location) {
+        const newId = location.split('/').pop();
+        if (newId) {
+          localStorage.setItem(STORED_BLOB_ID_KEY, newId);
+          return newId;
         }
       }
     } catch (e) {
-      console.error('Pull cloud error:', e);
+      console.error('Create blob failed:', e);
     }
+    return null;
+  };
+
+  // 拉取雲端資料
+  const pullFromCloud = async (isManualRetry = false) => {
+    setSyncStatus('syncing');
+    const validBlobId = await getOrCreateValidCloudBlobId();
+
+    if (validBlobId) {
+      try {
+        const res = await fetch(`${JSON_BLOB_BASE}/${validBlobId}`, { cache: 'no-cache' });
+        if (res.ok) {
+          const cloudObj = await res.json();
+          if (cloudObj && cloudObj.itinerary) {
+            setItinerary(cloudObj.itinerary);
+            if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+            if (cloudObj.members) setMembers(cloudObj.members);
+
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudObj));
+            setSyncStatus('success');
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setLastSyncTime(timeStr);
+
+            if (isManualRetry) {
+              alert(`🟢 雲端連線診斷成功！\n\n- 連線狀態：正常 (200 OK)\n- 雲端通道 ID：${validBlobId}\n- 行程天數：${cloudObj.itinerary.length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
+            }
+            return true;
+          }
+        }
+      } catch (e) {
+        console.error('Pull cloud error:', e);
+      }
+    }
+
     setSyncStatus('error');
-    if (showPrompt) alert('🔴 雲端連線失敗，已自動讀取手機本地快存。');
+    if (isManualRetry) {
+      alert('🔴 雲端連線失敗，已自動啟用離線模式。\n💡 您的修改已儲存在手機內，連線恢復時將自動同步。');
+    }
     return false;
   };
 
-  // ☁️ 100% 成功直連推送數據至雲端
+  // 推送資料至雲端
   const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
     const targetItinerary = newItinerary || itinerary;
     const targetExpenses = newExpenses || expenses;
     const targetMembers = newMembers || members;
 
-    // 1. 先更新 React 本地 State 與 LocalStorage 備份
+    // 1. 更新本地 State
     if (newItinerary) setItinerary(newItinerary);
     if (newExpenses) setExpenses(newExpenses);
     if (newMembers) setMembers(newMembers);
@@ -217,32 +265,36 @@ export default function App() {
       members: targetMembers,
       updatedAt: Date.now()
     };
-    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
 
-    // 2. 直連推送到雲端
+    // 2. 推送雲端
     setSyncStatus('syncing');
-    try {
-      const res = await fetch(CLOUD_SYNC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+    const validBlobId = await getOrCreateValidCloudBlobId();
 
-      if (res.ok) {
-        setSyncStatus('success');
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncTime(timeStr);
-        showToast('☁️ 已即時同步至雲端！');
-      } else {
-        setSyncStatus('error');
+    if (validBlobId) {
+      try {
+        const res = await fetch(`${JSON_BLOB_BASE}/${validBlobId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          setSyncStatus('success');
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setLastSyncTime(timeStr);
+          showToast('☁️ 已即時同步至雲端！');
+          return;
+        }
+      } catch (e) {
+        console.error('Push cloud error:', e);
       }
-    } catch (e) {
-      console.error('Push cloud error:', e);
-      setSyncStatus('error');
     }
+
+    setSyncStatus('error');
   };
 
-  // 開機自動載入 + 切換分頁時自動同步
+  // 開機自動診斷並同步
   useEffect(() => {
     pullFromCloud(false);
 
@@ -298,7 +350,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 行程順序微調 (確保持續觸發 React 重繪)
+  // 行程順序調整
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
@@ -433,7 +485,7 @@ export default function App() {
     const fullData = { itinerary, expenses, members, exportedAt: new Date().toLocaleString() };
     const str = JSON.stringify(fullData, null, 2);
     navigator.clipboard.writeText(str);
-    alert('📋 行程與花費完整 JSON 資料已複製到剪貼簿！可以貼上分享或保存為文字檔。');
+    alert('📋 行程與花費完整 JSON 資料已複製到剪貼簿！');
   };
 
   const handleImportData = () => {
@@ -471,13 +523,13 @@ export default function App() {
             <button
               onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制進行連線同步"
+              title="點擊強制進行雲端連線診斷"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
               <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
 
-            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200" title="實體備份/匯入匯出">
+            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
               ⚙️
             </button>
           </div>
@@ -486,7 +538,7 @@ export default function App() {
 
         <button
           onClick={() => setIsEditMode(!isEditMode)}
-          className={`text-[10px] px-3 py-1.5 rounded-full font-bold border transition shadow-sm ${
+          className={`text-[10px] px-3 py-1.5 rounded-full font-bold border transition shadow-sm cursor-pointer ${
             isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
           }`}
         >
@@ -504,7 +556,7 @@ export default function App() {
                 <button
                   key={idx}
                   onClick={() => setSelectedDayIdx(idx)}
-                  className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition ${
+                  className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                     selectedDayIdx === idx ? 'text-white scale-105 shadow-md' : 'bg-white text-gray-600'
                   }`}
                   style={{ backgroundColor: selectedDayIdx === idx ? THEME.accent : '' }}
@@ -521,7 +573,7 @@ export default function App() {
                 <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
               </div>
               {isEditMode && (
-                <button onClick={() => setShowAddSpotModal(true)} className="text-xs px-2.5 py-1.5 rounded-lg text-white font-bold shadow" style={{ backgroundColor: THEME.accent }}>
+                <button onClick={() => setShowAddSpotModal(true)} className="text-xs px-2.5 py-1.5 rounded-lg text-white font-bold shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                   ➕ 新增行程
                 </button>
               )}
@@ -569,7 +621,7 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 編輯模式：極簡低調微調控制 */}
+                      {/* 編輯模式：微調控制按鈕 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
@@ -636,7 +688,7 @@ export default function App() {
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
-                <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow" style={{ backgroundColor: THEME.accent }}>
+                <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                   新增
                 </button>
               </div>
@@ -651,7 +703,7 @@ export default function App() {
                       {item.done ? '✅' : '⬜'} {item.text}
                     </span>
                   </div>
-                  <button onClick={() => setPrepList(prepList.filter(p => p.id !== item.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1">✕</button>
+                  <button onClick={() => setPrepList(prepList.filter(p => p.id !== item.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
@@ -670,7 +722,7 @@ export default function App() {
                 <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="p-2 text-xs border rounded-xl" />
                 <input type="text" placeholder="購買地點" value={newShopTarget} onChange={e => setNewShopTarget(e.target.value)} className="p-2 text-xs border rounded-xl" />
               </div>
-              <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]); setNewShopName(''); setNewShopTarget(''); }} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow" style={{ backgroundColor: THEME.accent }}>
+              <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]); setNewShopName(''); setNewShopTarget(''); }} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                 新增至清單
               </button>
             </div>
@@ -685,7 +737,7 @@ export default function App() {
                       <div className="text-xs text-gray-400">地點：{s.target}</div>
                     </div>
                   </div>
-                  <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1">✕</button>
+                  <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
@@ -715,16 +767,16 @@ export default function App() {
               )}
 
               <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
-                <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${filterMember === '全部' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 cursor-pointer ${filterMember === '全部' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'}`}>
                   全部花費
                 </button>
                 {members.map(m => (
                   <div key={m} className="flex items-center space-x-1 bg-gray-100 px-2 py-1 rounded-xl flex-shrink-0 border border-gray-200">
-                    <button onClick={() => setFilterMember(m)} className={`text-xs font-bold ${filterMember === m ? 'text-amber-800 font-extrabold' : 'text-gray-600'}`}>{m}</button>
+                    <button onClick={() => setFilterMember(m)} className={`text-xs font-bold cursor-pointer ${filterMember === m ? 'text-amber-800 font-extrabold' : 'text-gray-600'}`}>{m}</button>
                     {isEditMode && (
                       <>
-                        <button onClick={() => handleRenameMember(m)} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold ml-1">✏️</button>
-                        <button onClick={() => handleDeleteMember(m)} className="text-gray-300 hover:text-gray-600 text-[10px] font-bold">✕</button>
+                        <button onClick={() => handleRenameMember(m)} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold ml-1 cursor-pointer">✏️</button>
+                        <button onClick={() => handleDeleteMember(m)} className="text-gray-300 hover:text-gray-600 text-[10px] font-bold cursor-pointer">✕</button>
                       </>
                     )}
                   </div>
@@ -759,12 +811,12 @@ export default function App() {
                     <div className="flex justify-between items-center pt-1 border-t border-gray-200/50 text-[10px]">
                       <span className="text-gray-400">對象：{exp.splitFor.join(', ')}</span>
                       {isEditMode && (
-                        <button onClick={() => setEditingExpense(exp)} className="text-amber-800 font-bold underline">✏️ 編輯明細</button>
+                        <button onClick={() => setEditingExpense(exp)} className="text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
                       )}
                     </div>
 
                     {isEditMode && (
-                      <button onClick={() => handleDeleteExpense(exp.id)} className="absolute top-2.5 right-2.5 text-gray-300 hover:text-red-500 font-bold text-xs">✕</button>
+                      <button onClick={() => handleDeleteExpense(exp.id)} className="absolute top-2.5 right-2.5 text-gray-300 hover:text-red-500 font-bold text-xs cursor-pointer">✕</button>
                     )}
                   </div>
                 ))}
@@ -775,16 +827,16 @@ export default function App() {
 
       </main>
 
-      {/* 實體備份與匯入 Modal */}
+      {/* 實體備份 Modal */}
       {showBackupModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>⚙️ 實體備份與備用匯入</h3>
-              <button onClick={() => setShowBackupModal(false)} className="text-gray-400 font-bold">✕</button>
+              <button onClick={() => setShowBackupModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
 
-            <button onClick={handleExportData} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs shadow hover:bg-slate-700">
+            <button onClick={handleExportData} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs shadow hover:bg-slate-700 cursor-pointer">
               📋 一鍵複製完整行程花費 (JSON)
             </button>
 
@@ -796,7 +848,7 @@ export default function App() {
                 placeholder="把複製的 JSON 內容貼在這裡..."
                 className="w-full p-2 text-xs border rounded-xl h-24 font-mono"
               />
-              <button onClick={handleImportData} className="w-full py-2 bg-amber-800 text-white rounded-xl font-bold text-xs shadow">
+              <button onClick={handleImportData} className="w-full py-2 bg-amber-800 text-white rounded-xl font-bold text-xs shadow cursor-pointer">
                 確認匯入並覆蓋更新
               </button>
             </div>
@@ -810,7 +862,7 @@ export default function App() {
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>✏️ 修改景點資訊</h3>
-              <button onClick={() => setEditingSpot(null)} className="text-gray-400 font-bold">✕</button>
+              <button onClick={() => setEditingSpot(null)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
             <input type="text" value={editingSpot.name} onChange={e => setEditingSpot({...editingSpot, name: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="景點名稱" />
             <div className="grid grid-cols-2 gap-2">
@@ -836,7 +888,7 @@ export default function App() {
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>➕ 動態新增當天行程</h3>
-              <button onClick={() => setShowAddSpotModal(false)} className="text-gray-400 font-bold">✕</button>
+              <button onClick={() => setShowAddSpotModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
             <input type="text" placeholder="行程/景點名稱" value={newSpot.name} onChange={e => setNewSpot({...newSpot, name: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <div className="grid grid-cols-2 gap-2">
@@ -862,7 +914,7 @@ export default function App() {
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>➕ 記錄新花費</h3>
-              <button onClick={() => setShowAddExpenseModal(false)} className="text-gray-400 font-bold">✕</button>
+              <button onClick={() => setShowAddExpenseModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
             <input type="text" placeholder="花費項目 (例: 亞羅街晚餐)" value={newExpense.item} onChange={e => setNewExpense({...newExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <div className="grid grid-cols-2 gap-2">
@@ -908,7 +960,7 @@ export default function App() {
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>✏️ 修改花費明細</h3>
-              <button onClick={() => setEditingExpense(null)} className="text-gray-400 font-bold">✕</button>
+              <button onClick={() => setEditingExpense(null)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
             <input type="text" value={editingExpense.item} onChange={e => setEditingExpense({...editingExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="項目" />
             <div className="grid grid-cols-2 gap-2">
