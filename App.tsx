@@ -99,7 +99,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // ☁️ 雲端跨手機連線同步 State (行程, 花費, 成員)
+  // ☁️ 雲端跨手機連線同步 State
   const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
   const [members, setMembers] = useState(['我', '成員A', '成員B']);
   const [expenses, setExpenses] = useState([
@@ -136,12 +136,13 @@ export default function App() {
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // ☁️ 全球雲端同步 (JSONBlob REST API，跨手機 100% 通暢)
+  // ☁️ 全球雲端同步 (JSONBlob REST API)
   const pullCloudData = async () => {
     try {
       setIsSyncing(true);
       const res = await fetch(JSON_BLOB_API, {
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-cache'
       });
       if (res.ok) {
         const cloudData = await res.json();
@@ -151,13 +152,13 @@ export default function App() {
         setLastSyncTime(new Date().toLocaleTimeString());
       }
     } catch (e) {
-      console.log('Cloud sync fetch error');
+      console.log('Cloud sync fetch error', e);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const pushCloudData = async (newItinerary: any, newExpenses: any, newMembers: any) => {
+  const pushCloudData = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
     try {
       setIsSyncing(true);
       const payload = {
@@ -176,14 +177,24 @@ export default function App() {
       });
       setLastSyncTime(new Date().toLocaleTimeString());
     } catch (e) {
-      console.log('Cloud sync push error');
+      console.log('Cloud sync push error', e);
     } finally {
       setIsSyncing(false);
     }
   };
 
+  // 初始化並設定手機喚醒時「自動同步最新雲端資料」
   useEffect(() => {
     pullCloudData();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        pullCloudData();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   // 🌤️ 動態即時氣象
@@ -231,7 +242,20 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 1. 行程拖移與編輯 (同步雲端)
+  // 1. 行程順序調整 (電腦拖曳 + 手機上下按鈕)
+  const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
+
+    const updated = [...itinerary];
+    const currentItems = [...updated[selectedDayIdx].items];
+    const [movedItem] = currentItems.splice(currentIndex, 1);
+    currentItems.splice(targetIndex, 0, movedItem);
+    updated[selectedDayIdx].items = currentItems;
+    setItinerary(updated);
+    pushCloudData(updated, expenses, members);
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
   const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
@@ -245,6 +269,14 @@ export default function App() {
     setItinerary(updated);
     pushCloudData(updated, expenses, members);
     setDraggedItemIdx(null);
+  };
+
+  const handleDeleteSpot = (spotId: string) => {
+    if (!confirm('確定刪除此行程嗎？')) return;
+    const updated = [...itinerary];
+    updated[selectedDayIdx].items = updated[selectedDayIdx].items.filter(item => item.id !== spotId);
+    setItinerary(updated);
+    pushCloudData(updated, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
@@ -303,13 +335,13 @@ export default function App() {
     }
   };
 
-  // 3. 花費管理 (含預設全選的成員分攤欄位)
+  // 3. 花費管理
   const handleOpenAddExpense = () => {
     setNewExpense({
       item: '',
       amount: '',
       currency: 'MYR',
-      selectedMembers: [...members], // 🎯 預設全選所有成員！
+      selectedMembers: [...members],
       note: ''
     });
     setShowAddExpenseModal(true);
@@ -344,6 +376,7 @@ export default function App() {
   };
 
   const handleDeleteExpense = (id: number) => {
+    if (!confirm('確定刪除此筆花費嗎？')) return;
     const newExpenses = expenses.filter(e => e.id !== id);
     setExpenses(newExpenses);
     pushCloudData(itinerary, newExpenses, members);
@@ -434,7 +467,7 @@ export default function App() {
                   onDragStart={(e) => handleDragStart(e, index)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, index)}
-                  className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-amber-900/10 ${isEditMode ? 'draggable-card' : ''}`}
+                  className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-amber-900/10 transition ${isEditMode ? 'ring-2 ring-amber-400/40' : ''}`}
                 >
                   {spot.img && (
                     <div className="h-36 w-full overflow-hidden relative">
@@ -445,19 +478,40 @@ export default function App() {
                   <div className="p-3.5">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center space-x-2">
-                        {isEditMode && <span className="p-1 px-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-400 text-xs font-bold cursor-grab">☰</span>}
                         <span className="text-[10px] px-2 py-0.5 rounded font-bold text-white" style={{ backgroundColor: THEME.primary }}>{spot.type}</span>
+                        <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
+                      {/* 📱 編輯模式下顯示「手機微調按鈕」與「刪除按鈕」 */}
                       {isEditMode && (
-                        <button onClick={() => setEditingSpot(spot)} className="text-xs text-amber-800 font-bold bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                          ✏️ 編輯
-                        </button>
+                        <div className="flex items-center space-x-1 bg-amber-50 p-1 rounded-lg border border-amber-200">
+                          <button
+                            onClick={() => handleMoveSpot(index, 'up')}
+                            disabled={index === 0}
+                            className="px-2 py-0.5 bg-white rounded border border-gray-200 text-xs font-bold disabled:opacity-30"
+                            title="向上移動"
+                          >
+                            ⬆️
+                          </button>
+                          <button
+                            onClick={() => handleMoveSpot(index, 'down')}
+                            disabled={index === itinerary[selectedDayIdx].items.length - 1}
+                            className="px-2 py-0.5 bg-white rounded border border-gray-200 text-xs font-bold disabled:opacity-30"
+                            title="向下移動"
+                          >
+                            ⬇️
+                          </button>
+                          <button onClick={() => setEditingSpot(spot)} className="text-xs text-amber-800 font-bold px-2 py-0.5 bg-white rounded border border-amber-200">
+                            ✏️ 編輯
+                          </button>
+                          <button onClick={() => handleDeleteSpot(spot.id)} className="text-xs text-red-600 font-bold px-1.5 py-0.5 bg-white rounded border border-red-200">
+                            🗑️
+                          </button>
+                        </div>
                       )}
                     </div>
 
                     <h3 className="font-bold text-sm mt-2" style={{ color: THEME.primary }}>{spot.name}</h3>
-                    <div className="text-xs text-gray-400 font-mono mt-0.5">{spot.time}</div>
                     
                     {spot.note && <p className="text-xs text-gray-600 mt-2 bg-amber-50/60 p-2 rounded-lg border border-amber-100">{spot.note}</p>}
                     
@@ -478,7 +532,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: 行前準備 (📱 存個人手機) */}
+        {/* TAB 2: 行前準備 */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
@@ -510,7 +564,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: 購買清單 (📱 存個人手機) */}
+        {/* TAB 3: 購買清單 */}
         {activeTab === 'shopping' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
@@ -616,7 +670,7 @@ export default function App() {
                     </div>
 
                     {isEditMode && (
-                      <button onClick={() => handleDeleteExpense(exp.id)} className="absolute top-2.5 right-2.5 text-gray-300 hover:text-gray-600 font-bold text-xs">✕</button>
+                      <button onClick={() => handleDeleteExpense(exp.id)} className="absolute top-2.5 right-2.5 text-gray-300 hover:text-red-500 font-bold text-xs">✕</button>
                     )}
                   </div>
                 ))}
@@ -679,7 +733,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🎯 新增花費 Modal (恢復成員勾選欄位，且預設全選！) */}
+      {/* 新增花費 Modal */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -696,9 +750,8 @@ export default function App() {
               </select>
             </div>
 
-            {/* 🎯 恢復的成員勾選欄位 (預設全選) */}
             <div>
-              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？(預設全選，可點擊勾選)</label>
+              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？(預設全選)</label>
               <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
                 {members.map(m => (
                   <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
@@ -726,7 +779,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🎯 編輯花費 Modal (含成員勾選) */}
+      {/* 編輯花費 Modal */}
       {editingExpense && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -743,7 +796,6 @@ export default function App() {
               </select>
             </div>
 
-            {/* 成員分攤勾選 */}
             <div>
               <label className="text-[10px] font-bold text-gray-500">修改此費用包含的成員：</label>
               <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
