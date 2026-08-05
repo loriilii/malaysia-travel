@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import ReactDOM from 'react-dom/client';
+import React, { useState, useEffect, useRef } from 'react';
 
 const THEME = {
   primary: '#183451',
@@ -8,9 +7,11 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
-const FIXED_FIREBASE_URL = "https://trip-app-malaysia-default-rtdb.firebaseio.com/master_trip.json";
-const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
+// 共用資料的 key（所有裝置共用同一份）
+const TRIP_DATA_KEY = 'trip-data';
+// 個人資料的 key（僅存於這個瀏覽器/裝置）
+const PREP_LIST_KEY = 'prep-list';
+const SHOPPING_LIST_KEY = 'shopping-list';
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -24,7 +25,7 @@ const DEFAULT_HOURLY_WEATHER = [
   { time: "21:00", temp: "27°", rain: "10%", icon: "🌙" }
 ];
 
-// 預設 8 天行程
+// 預設 8 天行程（第一次使用、雲端還沒有資料時的初始值）
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
@@ -96,167 +97,140 @@ const MASTER_ITINERARY = [
   }
 ];
 
+const DEFAULT_MEMBERS = ['我', '成員A', '成員B'];
+const DEFAULT_EXPENSES = [
+  { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+  { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
+];
+const DEFAULT_PREP_LIST = [
+  { id: 1, cat: "衣物配件", text: "排汗衫 / 薄短袖", done: false },
+  { id: 2, cat: "衣物配件", text: "薄外套 / 防曬罩衫", done: false },
+  { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
+];
+const DEFAULT_SHOPPING_LIST = [
+  { id: 1, name: "舊街場白咖啡 (OldTown)", target: "超市", bought: false },
+  { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // 1. React 狀態（從 LocalStorage 快存啟動，絕不白屏）
-  const [itinerary, setItinerary] = useState(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
-    if (saved) {
-      try { return JSON.parse(saved).itinerary || MASTER_ITINERARY; } catch (e) {}
-    }
-    return MASTER_ITINERARY;
-  });
+  // 共用行程資料（所有裝置共用）
+  const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
+  const [members, setMembers] = useState(DEFAULT_MEMBERS);
+  const [expenses, setExpenses] = useState(DEFAULT_EXPENSES);
 
-  const [members, setMembers] = useState<string[]>(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
-    if (saved) {
-      try { return JSON.parse(saved).members || ['我', '成員A', '成員B']; } catch (e) {}
-    }
-    return ['我', '成員A', '成員B'];
-  });
+  // 個人清單（僅存於此裝置/瀏覽器）
+  const [prepList, setPrepList] = useState(DEFAULT_PREP_LIST);
+  const [shoppingList, setShoppingList] = useState(DEFAULT_SHOPPING_LIST);
 
-  const [expenses, setExpenses] = useState<any[]>(() => {
-    const saved = localStorage.getItem(LOCAL_BACKUP_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved).expenses || [
-          { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
-          { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
-        ];
-      } catch (e) {}
-    }
-    return [
-      { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
-      { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' }
-    ];
-  });
-
-  // ☁️ 雲端狀態與提示
-  const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
+  // ☁️ 同步狀態
+  const [syncStatus, setSyncStatus] = useState('syncing'); // syncing | success | error
   const [lastSyncTime, setLastSyncTime] = useState('');
   const [toastMsg, setToastMsg] = useState('');
+  const [isReady, setIsReady] = useState(false);
 
-  // 📱 個人手機獨立清單 (localStorage)
-  const [prepList, setPrepList] = useState(() => {
-    const saved = localStorage.getItem('my_malaysia_prep');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, cat: "衣物配件", text: "排汗衫 / 薄短袖", done: false },
-      { id: 2, cat: "衣物配件", text: "薄外套 / 防曬罩衫", done: false },
-      { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
-    ];
-  });
-  const [newPrepText, setNewPrepText] = useState('');
-  const [newPrepCat] = useState('個人物品');
+  const hasLoadedOnce = useRef(false);
 
-  const [shoppingList, setShoppingList] = useState(() => {
-    const saved = localStorage.getItem('my_malaysia_shopping');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, name: "舊街場白咖啡 (OldTown)", target: "超市", bought: false },
-      { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
-    ];
-  });
-  const [newShopName, setNewShopName] = useState('');
-  const [newShopTarget, setNewShopTarget] = useState('');
-
-  const [showBackupModal, setShowBackupModal] = useState(false);
-  const [importJsonText, setImportJsonText] = useState('');
-
-  useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
-  useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
-
-  const showToast = (msg: string) => {
+  const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // ☁️ 100% 全球同一通道 Firebase 雲端讀取
-  const pullFromCloud = async (isManualRetry = false) => {
+  // 讀取共用行程資料
+  const pullTripData = async (isManualRetry = false) => {
     setSyncStatus('syncing');
     try {
-      const res = await fetch(FIXED_FIREBASE_URL, { cache: 'no-cache' });
-      if (res.ok) {
-        const cloudObj = await res.json();
-        if (cloudObj && cloudObj.itinerary) {
-          setItinerary(cloudObj.itinerary);
-          if (cloudObj.expenses) setExpenses(cloudObj.expenses);
-          if (cloudObj.members) setMembers(cloudObj.members);
-
-          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(cloudObj));
-          setSyncStatus('success');
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setLastSyncTime(timeStr);
-
-          if (isManualRetry) {
-            alert(`🟢 全球雲端連線成功！\n\n- 通道：Google Firebase 固定端點\n- 最新同步時間：${timeStr}\n- 雲端行程天數：${cloudObj.itinerary.length} 天\n- 雲端花費筆數：${(cloudObj.expenses || []).length} 筆\n\n其他同行手機只要整理網頁，即可看到此最新數據！`);
-          }
-          return true;
-        } else if (cloudObj === null) {
-          // 如果雲端尚未有資料，把本地預設行程推上去初始化
-          await pushToCloud(itinerary, expenses, members);
-          return true;
+      const result = await window.storage.get(TRIP_DATA_KEY, true);
+      if (result && result.value) {
+        const cloudObj = JSON.parse(result.value);
+        if (cloudObj.itinerary) setItinerary(cloudObj.itinerary);
+        if (cloudObj.expenses) setExpenses(cloudObj.expenses);
+        if (cloudObj.members) setMembers(cloudObj.members);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(timeStr);
+        setSyncStatus('success');
+        if (isManualRetry) {
+          alert(`🟢 雲端連線正常\n\n- 行程天數：${(cloudObj.itinerary || itinerary).length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
         }
+      } else {
+        // 雲端還沒有資料，代表這是第一次使用，用預設值建立一份
+        setSyncStatus('success');
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(timeStr);
       }
-    } catch (e) {
-      console.error('Pull cloud error:', e);
+    } catch (err) {
+      // key 不存在時 get 會 throw，這代表雲端尚未初始化，不算錯誤
+      setSyncStatus('success');
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSyncTime(timeStr);
     }
-
-    setSyncStatus('error');
-    if (isManualRetry) {
-      alert('🔴 雲端連線失敗，已自動啟用手機本地快存。\n💡 請檢查手機網路，連線恢復時將自動同步。');
-    }
-    return false;
+    return true;
   };
 
-  // ☁️ 100% 全球同一通道 Firebase 雲端寫入 (PUT)
-  const pushToCloud = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
+  // 寫入共用行程資料（所有裝置共用同一份 key，寫入後其他裝置下次讀取就會拿到最新版本）
+  const pushTripData = async (newItinerary, newExpenses, newMembers) => {
     const targetItinerary = newItinerary || itinerary;
     const targetExpenses = newExpenses || expenses;
     const targetMembers = newMembers || members;
 
-    // 1. 先更新本地 State 與備份
-    if (newItinerary) setItinerary(newItinerary);
-    if (newExpenses) setExpenses(newExpenses);
-    if (newMembers) setMembers(newMembers);
+    setItinerary(targetItinerary);
+    setExpenses(targetExpenses);
+    setMembers(targetMembers);
 
-    const payload = {
-      itinerary: targetItinerary,
-      expenses: targetExpenses,
-      members: targetMembers,
-      updatedAt: Date.now()
-    };
-    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(payload));
-
-    // 2. 直連推送到全團唯一的 Firebase 雲端點
     setSyncStatus('syncing');
     try {
-      const res = await fetch(FIXED_FIREBASE_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
+      const payload = { itinerary: targetItinerary, expenses: targetExpenses, members: targetMembers, updatedAt: Date.now() };
+      const result = await window.storage.set(TRIP_DATA_KEY, JSON.stringify(payload), true);
+      if (result) {
         setSyncStatus('success');
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSyncTime(timeStr);
-        showToast('☁️ 已即時同步至全團共享雲端！');
-        return;
+        showToast('☁️ 已同步至雲端，其他裝置下次開啟即可看到最新版本');
+      } else {
+        setSyncStatus('error');
+        showToast('⚠️ 同步失敗，請點右上角重試');
       }
-    } catch (e) {
-      console.error('Push cloud error:', e);
+    } catch (err) {
+      console.error('Push trip data error:', err);
+      setSyncStatus('error');
+      showToast('⚠️ 同步失敗，請點右上角重試');
     }
-
-    setSyncStatus('error');
   };
 
-  // 網頁開啟時 + 切換視窗時自動抓取全團最新雲端資料
+  // 個人清單：讀取
+  const loadPersonalLists = async () => {
+    try {
+      const prepResult = await window.storage.get(PREP_LIST_KEY, false);
+      if (prepResult && prepResult.value) setPrepList(JSON.parse(prepResult.value));
+    } catch (e) { /* key 尚不存在，使用預設值 */ }
+    try {
+      const shopResult = await window.storage.get(SHOPPING_LIST_KEY, false);
+      if (shopResult && shopResult.value) setShoppingList(JSON.parse(shopResult.value));
+    } catch (e) { /* key 尚不存在，使用預設值 */ }
+  };
+
+  const savePrepList = async (list) => {
+    setPrepList(list);
+    try { await window.storage.set(PREP_LIST_KEY, JSON.stringify(list), false); } catch (e) { console.error(e); }
+  };
+
+  const saveShoppingList = async (list) => {
+    setShoppingList(list);
+    try { await window.storage.set(SHOPPING_LIST_KEY, JSON.stringify(list), false); } catch (e) { console.error(e); }
+  };
+
+  // 開機讀取，並在切回前景時重新拉取共用資料（模擬跨裝置同步）
   useEffect(() => {
-    pullFromCloud(false);
+    (async () => {
+      await Promise.all([pullTripData(false), loadPersonalLists()]);
+      hasLoadedOnce.current = true;
+      setIsReady(true);
+    })();
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') pullFromCloud(false);
+      if (document.visibilityState === 'visible' && hasLoadedOnce.current) pullTripData(false);
     };
     window.addEventListener('visibilitychange', handleVisibility);
     return () => window.removeEventListener('visibilitychange', handleVisibility);
@@ -296,19 +270,27 @@ export default function App() {
 
   // UI State
   const [isEditMode, setIsEditMode] = useState(false);
-  const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
+  const [draggedItemIdx, setDraggedItemIdx] = useState(null);
   const [filterMember, setFilterMember] = useState('全部');
   const [newMemberInput, setNewMemberInput] = useState('');
 
-  const [editingSpot, setEditingSpot] = useState<any>(null);
+  const [editingSpot, setEditingSpot] = useState(null);
   const [showAddSpotModal, setShowAddSpotModal] = useState(false);
   const [newSpot, setNewSpot] = useState({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<any>(null);
-  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [], note: '' });
 
-  // 行程順序微調
-  const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
+  const [newPrepText, setNewPrepText] = useState('');
+  const [newPrepCat] = useState('個人物品');
+  const [newShopName, setNewShopName] = useState('');
+  const [newShopTarget, setNewShopTarget] = useState('');
+
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+
+  // 行程順序調整
+  const handleMoveSpot = (currentIndex, direction) => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
 
@@ -316,31 +298,31 @@ export default function App() {
     const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(currentIndex, 1);
     currentItems.splice(targetIndex, 0, movedItem);
-    updatedItinerary[selectedDayIdx].items = currentItems;
+    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
 
-    pushToCloud(updatedItinerary, expenses, members);
+    pushTripData(updatedItinerary, expenses, members);
   };
 
-  const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
-  const handleDrop = (e: React.DragEvent, dropTargetIdx: number) => {
+  const handleDragStart = (e, index) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
+  const handleDragOver = (e) => { e.preventDefault(); };
+  const handleDrop = (e, dropTargetIdx) => {
     e.preventDefault();
     if (!isEditMode || draggedItemIdx === null || draggedItemIdx === dropTargetIdx) return;
     const updatedItinerary = [...itinerary];
     const currentItems = [...updatedItinerary[selectedDayIdx].items];
     const [movedItem] = currentItems.splice(draggedItemIdx, 1);
     currentItems.splice(dropTargetIdx, 0, movedItem);
-    updatedItinerary[selectedDayIdx].items = currentItems;
+    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
 
-    pushToCloud(updatedItinerary, expenses, members);
+    pushTripData(updatedItinerary, expenses, members);
     setDraggedItemIdx(null);
   };
 
-  const handleDeleteSpot = (spotId: string) => {
+  const handleDeleteSpot = (spotId) => {
     if (!confirm('確定刪除此行程嗎？')) return;
     const updatedItinerary = [...itinerary];
-    updatedItinerary[selectedDayIdx].items = updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId);
-    pushToCloud(updatedItinerary, expenses, members);
+    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: updatedItinerary[selectedDayIdx].items.filter(item => item.id !== spotId) };
+    pushTripData(updatedItinerary, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
@@ -350,8 +332,8 @@ export default function App() {
     const idx = currentItems.findIndex(item => item.id === editingSpot.id);
     if (idx !== -1) {
       currentItems[idx] = { ...editingSpot };
-      updatedItinerary[selectedDayIdx].items = currentItems;
-      pushToCloud(updatedItinerary, expenses, members);
+      updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: currentItems };
+      pushTripData(updatedItinerary, expenses, members);
     }
     setEditingSpot(null);
   };
@@ -359,20 +341,20 @@ export default function App() {
   const handleAddSpotSubmit = () => {
     if (!newSpot.name) return;
     const updatedItinerary = [...itinerary];
-    updatedItinerary[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
-    pushToCloud(updatedItinerary, expenses, members);
+    updatedItinerary[selectedDayIdx] = { ...updatedItinerary[selectedDayIdx], items: [...updatedItinerary[selectedDayIdx].items, { ...newSpot, id: Date.now().toString() }] };
+    pushTripData(updatedItinerary, expenses, members);
     setNewSpot({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
     setShowAddSpotModal(false);
   };
 
   // 團員管理
-  const handleRenameMember = (oldName: string) => {
+  const handleRenameMember = (oldName) => {
     const newName = prompt(`請輸入成員【${oldName}】的新名字：`, oldName);
     if (!newName || !newName.trim() || newName.trim() === oldName) return;
     const trimmed = newName.trim();
     const newMembers = members.map(m => m === oldName ? trimmed : m);
     const newExpenses = expenses.map(e => ({ ...e, splitFor: e.splitFor.map(s => s === oldName ? trimmed : s) }));
-    pushToCloud(itinerary, newExpenses, newMembers);
+    pushTripData(itinerary, newExpenses, newMembers);
     if (filterMember === oldName) setFilterMember(trimmed);
   };
 
@@ -380,32 +362,26 @@ export default function App() {
     if (!newMemberInput.trim()) return;
     if (members.includes(newMemberInput.trim())) return alert('成員已存在');
     const newMembers = [...members, newMemberInput.trim()];
-    pushToCloud(itinerary, expenses, newMembers);
+    pushTripData(itinerary, expenses, newMembers);
     setNewMemberInput('');
   };
 
-  const handleDeleteMember = (target: string) => {
+  const handleDeleteMember = (target) => {
     if (members.length <= 1) return alert('請至少留一位成員');
     if (confirm(`確定刪除成員【${target}】嗎？`)) {
       const newMembers = members.filter(m => m !== target);
-      pushToCloud(itinerary, expenses, newMembers);
+      pushTripData(itinerary, expenses, newMembers);
       if (filterMember === target) setFilterMember('全部');
     }
   };
 
   // 花費管理
   const handleOpenAddExpense = () => {
-    setNewExpense({
-      item: '',
-      amount: '',
-      currency: 'MYR',
-      selectedMembers: [...members],
-      note: ''
-    });
+    setNewExpense({ item: '', amount: '', currency: 'MYR', selectedMembers: [...members], note: '' });
     setShowAddExpenseModal(true);
   };
 
-  const handleAddExpenseSubmit = (e: React.FormEvent) => {
+  const handleAddExpenseSubmit = (e) => {
     e.preventDefault();
     if (!newExpense.item || !newExpense.amount) return;
     if (newExpense.selectedMembers.length === 0) return alert('請至少勾選一位分攤成員！');
@@ -419,7 +395,7 @@ export default function App() {
       splitFor: newExpense.selectedMembers,
       note: newExpense.note
     }];
-    pushToCloud(itinerary, newExpenses, members);
+    pushTripData(itinerary, newExpenses, members);
     setShowAddExpenseModal(false);
   };
 
@@ -427,17 +403,35 @@ export default function App() {
     if (!editingExpense) return;
     if (editingExpense.splitFor.length === 0) return alert('請至少勾選一位分攤成員！');
     const newExpenses = expenses.map(e => e.id === editingExpense.id ? editingExpense : e);
-    pushToCloud(itinerary, newExpenses, members);
+    pushTripData(itinerary, newExpenses, members);
     setEditingExpense(null);
   };
 
-  const handleDeleteExpense = (id: number) => {
+  const handleDeleteExpense = (id) => {
     if (!confirm('確定刪除此筆花費嗎？')) return;
     const newExpenses = expenses.filter(e => e.id !== id);
-    pushToCloud(itinerary, newExpenses, members);
+    pushTripData(itinerary, newExpenses, members);
   };
 
-  // 實體備份匯出匯入
+  // 個人清單操作
+  const toggleFilterPrep = (id) => savePrepList(prepList.map(p => p.id === id ? { ...p, done: !p.done } : p));
+  const addPrepItem = () => {
+    if (!newPrepText.trim()) return;
+    savePrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]);
+    setNewPrepText('');
+  };
+  const deletePrepItem = (id) => savePrepList(prepList.filter(p => p.id !== id));
+
+  const toggleShopping = (id) => saveShoppingList(shoppingList.map(item => item.id === id ? { ...item, bought: !item.bought } : item));
+  const addShoppingItem = () => {
+    if (!newShopName.trim()) return;
+    saveShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]);
+    setNewShopName('');
+    setNewShopTarget('');
+  };
+  const deleteShoppingItem = (id) => saveShoppingList(shoppingList.filter(item => item.id !== id));
+
+  // 實體備份匯出匯入（額外保險，不依賴雲端也能轉移資料）
   const handleExportData = () => {
     const fullData = { itinerary, expenses, members, exportedAt: new Date().toLocaleString() };
     const str = JSON.stringify(fullData, null, 2);
@@ -449,8 +443,8 @@ export default function App() {
     try {
       const parsed = JSON.parse(importJsonText);
       if (parsed && parsed.itinerary) {
-        pushToCloud(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
-        alert('🟢 成功匯入資料並同步至全團雲端！');
+        pushTripData(parsed.itinerary, parsed.expenses || [], parsed.members || ['我']);
+        alert('🟢 成功匯入資料並同步至雲端！');
         setShowBackupModal(false);
         setImportJsonText('');
       } else {
@@ -461,36 +455,45 @@ export default function App() {
     }
   };
 
+  if (!isReady) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen flex items-center justify-center" style={{ backgroundColor: THEME.bg }}>
+        <div className="text-center space-y-2">
+          <div className="text-3xl animate-pulse">🌴</div>
+          <div className="text-sm text-slate-500 font-medium">正在載入行程資料...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
-      
-      {/* 浮動提示 Toast */}
+
       {toastMsg && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50">
           {toastMsg}
         </div>
       )}
 
-      {/* Header */}
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
-            
+
             <button
-              onClick={() => pullFromCloud(true)}
+              onClick={() => pullTripData(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制拉取全團最新雲端資料"
+              title="點擊強制拉取雲端最新資料"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
-              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `全團同步 ${lastSyncTime}` : '點此重試'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
 
             <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
               ⚙️
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (Firebase 直連中心)</p>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
         </div>
 
         <button
@@ -505,7 +508,6 @@ export default function App() {
 
       <main className="p-4 space-y-4">
 
-        {/* TAB 1: 行程總覽 */}
         {activeTab === 'itinerary' && (
           <div className="space-y-3">
             <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
@@ -536,7 +538,6 @@ export default function App() {
               )}
             </div>
 
-            {/* 24 小時動態氣象 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
                 <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
@@ -554,7 +555,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 行程卡片 */}
             <div className="space-y-3 pt-1">
               {itinerary[selectedDayIdx].items.map((spot, index) => (
                 <div
@@ -578,7 +578,6 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 編輯模式：微調控制 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
@@ -586,38 +585,30 @@ export default function App() {
                             disabled={index === 0}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向上移動"
-                          >
-                            ▲
-                          </button>
+                          >▲</button>
                           <button
                             onClick={() => handleMoveSpot(index, 'down')}
                             disabled={index === itinerary[selectedDayIdx].items.length - 1}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向下移動"
-                          >
-                            ▼
-                          </button>
+                          >▼</button>
                           <button
                             onClick={() => setEditingSpot(spot)}
                             className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition cursor-pointer"
-                          >
-                            編輯
-                          </button>
+                          >編輯</button>
                           <button
                             onClick={() => handleDeleteSpot(spot.id)}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded text-xs border border-gray-200 transition cursor-pointer"
                             title="刪除"
-                          >
-                            ✕
-                          </button>
+                          >✕</button>
                         </div>
                       )}
                     </div>
 
                     <h3 className="font-bold text-sm mt-2" style={{ color: THEME.primary }}>{spot.name}</h3>
-                    
+
                     {spot.note && <p className="text-xs text-gray-600 mt-2 bg-amber-50/60 p-2 rounded-lg border border-amber-100">{spot.note}</p>}
-                    
+
                     {spot.map && (
                       <a
                         href={spot.map}
@@ -635,17 +626,16 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: 行前準備 */}
         {activeTab === 'prep' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增準備項目</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人裝置</span>
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="物品名稱" value={newPrepText} onChange={e => setNewPrepText(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
-                <button onClick={() => { if (!newPrepText.trim()) return; setPrepList([...prepList, { id: Date.now(), cat: newPrepCat, text: newPrepText.trim(), done: false }]); setNewPrepText(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+                <button onClick={addPrepItem} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                   新增
                 </button>
               </div>
@@ -655,31 +645,30 @@ export default function App() {
               <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🎒 個人檢查清單</h2>
               {prepList.map(item => (
                 <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
-                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setPrepList(prepList.map(p => p.id === item.id ? {...p, done: !p.done} : p))}>
+                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => toggleFilterPrep(item.id)}>
                     <span className={`text-sm ${item.done ? 'line-through text-gray-400' : 'font-medium'}`}>
                       {item.done ? '✅' : '⬜'} {item.text}
                     </span>
                   </div>
-                  <button onClick={() => setPrepList(prepList.filter(p => p.id !== item.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
+                  <button onClick={() => deletePrepItem(item.id)} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* TAB 3: 購買清單 */}
         {activeTab === 'shopping' && (
           <div className="space-y-4">
             <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
               <div className="flex justify-between items-center">
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增想買伴手禮</h3>
-                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
+                <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人裝置</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="p-2 text-xs border rounded-xl" />
                 <input type="text" placeholder="購買地點" value={newShopTarget} onChange={e => setNewShopTarget(e.target.value)} className="p-2 text-xs border rounded-xl" />
               </div>
-              <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]); setNewShopName(''); setNewShopTarget(''); }} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+              <button onClick={addShoppingItem} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
                 新增至清單
               </button>
             </div>
@@ -688,20 +677,19 @@ export default function App() {
               <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🛍️ 個人購物清單</h2>
               {shoppingList.map(s => (
                 <div key={s.id} className="p-3 bg-white border border-gray-100 rounded-xl flex justify-between items-center">
-                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? {...item, bought: !item.bought} : item))}>
+                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => toggleShopping(s.id)}>
                     <div>
                       <div className={`font-bold text-sm ${s.bought ? 'line-through text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</div>
                       <div className="text-xs text-gray-400">地點：{s.target}</div>
                     </div>
                   </div>
-                  <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
+                  <button onClick={() => deleteShoppingItem(s.id)} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* TAB 4: 行程花費 */}
         {activeTab === 'expenses' && (
           <div className="space-y-4">
             {isEditMode && (
@@ -784,7 +772,6 @@ export default function App() {
 
       </main>
 
-      {/* 實體備份 Modal */}
       {showBackupModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -813,7 +800,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 編輯景點 Modal */}
       {editingSpot && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -839,7 +825,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 新增景點 Modal */}
       {showAddSpotModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -865,7 +850,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 新增花費 Modal */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -911,7 +895,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 編輯花費 Modal */}
       {editingExpense && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
@@ -940,7 +923,7 @@ export default function App() {
                         if (e.target.checked) {
                           setEditingExpense({ ...editingExpense, splitFor: [...editingExpense.splitFor, m] });
                         } else {
-                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter((x: string) => x !== m) });
+                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter(x => x !== m) });
                         }
                       }}
                       className="rounded text-amber-800 focus:ring-amber-800"
@@ -957,7 +940,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 底部 Tab */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40">
         <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[11px]">
           {[
@@ -980,10 +962,4 @@ export default function App() {
 
     </div>
   );
-}
-
-// 渲染安裝
-const rootElement = document.getElementById('root');
-if (rootElement) {
-  ReactDOM.createRoot(rootElement).render(<App />);
 }
