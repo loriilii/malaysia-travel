@@ -138,6 +138,10 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 3000);
   };
 
+  // 驗證行程資料格式是否正確，避免壞資料讓畫面崩潰變白
+  const isValidItinerary = (val) =>
+    Array.isArray(val) && val.length > 0 && val.every(d => d && Array.isArray(d.items));
+
   // 讀取共用行程資料
   const pullTripData = async (isManualRetry = false) => {
     setSyncStatus('syncing');
@@ -145,14 +149,24 @@ export default function App() {
       const result = await window.storage.get(TRIP_DATA_KEY, true);
       if (result && result.value) {
         const cloudObj = JSON.parse(result.value);
-        if (cloudObj.itinerary) setItinerary(cloudObj.itinerary);
-        if (cloudObj.expenses) setExpenses(cloudObj.expenses);
-        if (cloudObj.members) setMembers(cloudObj.members);
+
+        if (isValidItinerary(cloudObj.itinerary)) {
+          setItinerary(cloudObj.itinerary);
+          setSelectedDayIdx(prev => Math.min(prev, cloudObj.itinerary.length - 1));
+        } else if (cloudObj.itinerary) {
+          console.warn('雲端 itinerary 格式不正確，改用預設行程', cloudObj.itinerary);
+          showToast('⚠️ 雲端行程資料格式異常，已改用預設行程顯示');
+        }
+
+        if (Array.isArray(cloudObj.expenses)) setExpenses(cloudObj.expenses);
+        if (Array.isArray(cloudObj.members) && cloudObj.members.length > 0) setMembers(cloudObj.members);
+
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSyncTime(timeStr);
         setSyncStatus('success');
         if (isManualRetry) {
-          alert(`🟢 雲端連線正常\n\n- 行程天數：${(cloudObj.itinerary || itinerary).length} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
+          const dayCount = isValidItinerary(cloudObj.itinerary) ? cloudObj.itinerary.length : itinerary.length;
+          alert(`🟢 雲端連線正常\n\n- 行程天數：${dayCount} 天\n- 花費筆數：${(cloudObj.expenses || []).length} 筆\n- 更新時間：${timeStr}`);
         }
       } else {
         // 雲端還沒有資料，代表這是第一次使用，用預設值建立一份
@@ -161,7 +175,11 @@ export default function App() {
         setLastSyncTime(timeStr);
       }
     } catch (err) {
-      // key 不存在時 get 會 throw，這代表雲端尚未初始化，不算錯誤
+      // key 不存在時 get 會 throw，這代表雲端尚未初始化，不算錯誤；解析失敗才是真正的問題
+      if (err instanceof SyntaxError) {
+        console.error('雲端資料 JSON 解析失敗', err);
+        showToast('⚠️ 雲端資料損毀，已改用目前畫面上的版本');
+      }
       setSyncStatus('success');
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastSyncTime(timeStr);
@@ -235,6 +253,13 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibility);
     return () => window.removeEventListener('visibilitychange', handleVisibility);
   }, []);
+
+  // 若行程天數變短（例如換了雲端資料），確保選到的天數索引不會超出範圍
+  useEffect(() => {
+    if (Array.isArray(itinerary) && itinerary.length > 0 && selectedDayIdx > itinerary.length - 1) {
+      setSelectedDayIdx(itinerary.length - 1);
+    }
+  }, [itinerary]);
 
   // 🌤️ 動態即時氣象
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
@@ -466,6 +491,27 @@ export default function App() {
     );
   }
 
+  // 最後一道防線：如果 itinerary 是空的或索引超出範圍，顯示可操作的錯誤畫面而不是空白
+  if (!Array.isArray(itinerary) || itinerary.length === 0) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: THEME.bg }}>
+        <div className="text-center space-y-3 bg-white p-5 rounded-2xl shadow border border-amber-900/10">
+          <div className="text-3xl">⚠️</div>
+          <div className="text-sm font-bold" style={{ color: THEME.primary }}>行程資料異常</div>
+          <p className="text-xs text-gray-500">雲端行程資料是空的或格式不正確。</p>
+          <button
+            onClick={() => { setItinerary(MASTER_ITINERARY); setSelectedDayIdx(0); pushTripData(MASTER_ITINERARY, expenses, members); }}
+            className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer"
+            style={{ backgroundColor: THEME.accent }}
+          >
+            重設為預設行程並同步至雲端
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const safeDayIdx = Math.min(Math.max(selectedDayIdx, 0), itinerary.length - 1);
+
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
 
@@ -528,8 +574,8 @@ export default function App() {
 
             <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10 flex justify-between items-center">
               <div>
-                <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
-                <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
+                <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[safeDayIdx].title}</h2>
+                <p className="text-[10px] text-gray-400">📍 區域：{itinerary[safeDayIdx].city}</p>
               </div>
               {isEditMode && (
                 <button onClick={() => setShowAddSpotModal(true)} className="text-xs px-2.5 py-1.5 rounded-lg text-white font-bold shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
@@ -540,7 +586,7 @@ export default function App() {
 
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
+                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[safeDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
                 <span className="text-[10px] text-slate-400">橫向滑動 →</span>
               </div>
               <div className="flex overflow-x-auto space-x-2.5 pb-1 pt-1 scrollbar-none">
@@ -556,7 +602,7 @@ export default function App() {
             </div>
 
             <div className="space-y-3 pt-1">
-              {itinerary[selectedDayIdx].items.map((spot, index) => (
+              {itinerary[safeDayIdx].items.map((spot, index) => (
                 <div
                   key={spot.id}
                   draggable={isEditMode}
@@ -588,7 +634,7 @@ export default function App() {
                           >▲</button>
                           <button
                             onClick={() => handleMoveSpot(index, 'down')}
-                            disabled={index === itinerary[selectedDayIdx].items.length - 1}
+                            disabled={index === itinerary[safeDayIdx].items.length - 1}
                             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs disabled:opacity-25 border border-gray-200 transition cursor-pointer"
                             title="向下移動"
                           >▼</button>
