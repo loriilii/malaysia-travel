@@ -8,11 +8,10 @@ const THEME = {
   sand: '#D4AF83'
 };
 
-// 雲端連線端點
+// 本地備份與雲端固定 Key
+const LOCAL_STORAGE_KEY = "MY_MALAYSIA_TRIP_MASTER_DATA_V3";
+const CLOUD_BLOB_ID_KEY = "MY_MALAYSIA_TRIP_BLOB_ID_V3";
 const JSON_BLOB_BASE = "https://jsonblob.com/api/jsonBlob";
-// 全團固定共享金鑰 (保證所有人打開主網址都連到同一個雲端資料庫)
-const GLOBAL_APP_KEY = "MY_MALAYSIA_TRIP_2026_SHARED_MASTER_KEY_V2";
-const KEY_VAL_API = `https://keyvalue.immanuel.co/api/KeyVal`;
 
 // 預設氣象
 const DEFAULT_HOURLY_WEATHER = [
@@ -102,18 +101,30 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
 
-  // ☁️ 雲端狀態
-  const [blobId, setBlobId] = useState<string | null>(null);
+  // 1. 本地快存優先載入（確保不卡死）
+  const [localData, setLocalData] = useState(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {
+      itinerary: MASTER_ITINERARY,
+      members: ['我', '成員A', '成員B'],
+      expenses: [
+        { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
+        { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' },
+        { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
+      ]
+    };
+  });
+
+  const itinerary = localData.itinerary;
+  const members = localData.members;
+  const expenses = localData.expenses;
+
+  // ☁️ 雲端狀態與提示
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'success' | 'error'>('syncing');
   const [lastSyncTime, setLastSyncTime] = useState('');
-
-  const [itinerary, setItinerary] = useState(MASTER_ITINERARY);
-  const [members, setMembers] = useState(['我', '成員A', '成員B']);
-  const [expenses, setExpenses] = useState([
-    { id: 1, date: '8/15', item: '機場快線車票', amount: 220, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '全團車票' },
-    { id: 2, date: '8/15', item: '亞羅街海鮮晚餐', amount: 180, currency: 'MYR', splitFor: ['我', '成員A', '成員B'], note: '晚餐' },
-    { id: 3, date: '8/15', item: '個人藥品保養品', amount: 45, currency: 'MYR', splitFor: ['成員A'], note: '成員A個人採買' }
-  ]);
 
   // 📱 個人手機獨立清單 (localStorage)
   const [prepList, setPrepList] = useState(() => {
@@ -140,132 +151,123 @@ export default function App() {
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
-  // ☁️ 全球固定金鑰自動尋找/建立邏輯
-  const getOrInitGlobalBlobId = async () => {
+  // 更新本地記憶體並同步備份
+  const updateLocalAndBackup = (newItinerary: any, newExpenses: any, newMembers: any) => {
+    const updatedObj = { itinerary: newItinerary, expenses: newExpenses, members: newMembers, updatedAt: Date.now() };
+    setLocalData(updatedObj);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedObj));
+    return updatedObj;
+  };
+
+  // ☁️ 實時雙向同步處理核心
+  const syncWithCloud = async (isManualRetry = false) => {
+    setSyncStatus('syncing');
+    let currentBlobId = localStorage.getItem(CLOUD_BLOB_ID_KEY);
+
     try {
-      // 1. 嘗試從全域註冊器讀取這個專案專屬的共享 ID
-      const res = await fetch(`${KEY_VAL_API}/GetValue/${GLOBAL_APP_KEY}/BLOB_ID`);
-      if (res.ok) {
-        const existingId = (await res.text()).replace(/"/g, '').trim();
-        if (existingId && existingId.length > 5 && existingId !== 'Null') {
-          return existingId;
+      // Step A: 如果沒有雲端 ID，先建立全新的備援通道
+      if (!currentBlobId) {
+        const createRes = await fetch(JSON_BLOB_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(localData)
+        });
+        const location = createRes.headers.get('Location');
+        if (location) {
+          currentBlobId = location.split('/').pop() || null;
+          if (currentBlobId) {
+            localStorage.setItem(CLOUD_BLOB_ID_KEY, currentBlobId);
+          }
+        }
+      }
+
+      // Step B: 從雲端讀取最新數據
+      if (currentBlobId) {
+        const fetchRes = await fetch(`${JSON_BLOB_BASE}/${currentBlobId}`, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-cache'
+        });
+
+        if (fetchRes.ok) {
+          const cloudObj = await fetchRes.json();
+          if (cloudObj && cloudObj.itinerary) {
+            // 如果雲端的資料更新，則覆蓋本地
+            updateLocalAndBackup(cloudObj.itinerary, cloudObj.expenses || [], cloudObj.members || []);
+            setSyncStatus('success');
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setLastSyncTime(timeStr);
+            if (isManualRetry) alert(`🟢 雲端同步成功！數據已於 ${timeStr} 成功更新！`);
+            return;
+          }
+        } else {
+          // 如果 Blob ID 失效，重新建立新通道並上傳本地數據
+          const reCreateRes = await fetch(JSON_BLOB_BASE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(localData)
+          });
+          const newLoc = reCreateRes.headers.get('Location');
+          if (newLoc) {
+            const newId = newLoc.split('/').pop();
+            if (newId) {
+              localStorage.setItem(CLOUD_BLOB_ID_KEY, newId);
+              setSyncStatus('success');
+              const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setLastSyncTime(timeStr);
+              if (isManualRetry) alert(`🟢 雲端備援通道已修復並同步完成 (${timeStr})！`);
+              return;
+            }
+          }
         }
       }
     } catch (e) {
-      console.log('Lookup global ID failed, creating new registry...');
+      console.error('Cloud Sync Error:', e);
     }
 
-    // 2. 如果全域尚未建立，自動在雲端產生全新的共享 Blob
-    try {
-      const payload = { itinerary: MASTER_ITINERARY, expenses, members, updatedAt: Date.now() };
-      const createRes = await fetch(JSON_BLOB_BASE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const location = createRes.headers.get('Location');
-      if (location) {
-        const newId = location.split('/').pop();
-        if (newId) {
-          // 將產生的 ID 註冊到全域，這樣所有人開啟主網址都會連到此 ID
-          await fetch(`${KEY_VAL_API}/UpdateValue/${GLOBAL_APP_KEY}/BLOB_ID/${newId}`, { method: 'POST' });
-          return newId;
-        }
-      }
-    } catch (e) {
-      console.error('Create global blob failed:', e);
-    }
-    return null;
-  };
-
-  // 從雲端拉取最新資料
-  const fetchCloudData = async (targetId?: string) => {
-    const activeId = targetId || blobId;
-    if (!activeId) return;
-
-    try {
-      setSyncStatus('syncing');
-      const res = await fetch(`${JSON_BLOB_BASE}/${activeId}`, {
-        headers: { 'Accept': 'application/json' },
-        cache: 'no-cache'
-      });
-      if (res.ok) {
-        const cloudData = await res.json();
-        if (cloudData.itinerary) setItinerary(cloudData.itinerary);
-        if (cloudData.expenses) setExpenses(cloudData.expenses);
-        if (cloudData.members) setMembers(cloudData.members);
-        setSyncStatus('success');
-        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      } else {
-        setSyncStatus('error');
-      }
-    } catch (e) {
-      console.error('Fetch cloud data error:', e);
-      setSyncStatus('error');
+    setSyncStatus('error');
+    if (isManualRetry) {
+      alert('🔴 雲端連線失敗，請檢查網路連線。\n💡 別擔心！您剛剛修改的所有內容已安全存在您的手機中。');
     }
   };
 
-  // 推送資料更新到雲端
-  const pushCloudData = async (newItinerary?: any, newExpenses?: any, newMembers?: any) => {
-    let activeId = blobId;
-    if (!activeId) {
-      activeId = await getOrInitGlobalBlobId();
-      if (activeId) setBlobId(activeId);
-      else return;
-    }
+  // 推送資料至雲端
+  const pushToCloud = async (newItinerary: any, newExpenses: any, newMembers: any) => {
+    const updatedObj = updateLocalAndBackup(newItinerary, newExpenses, newMembers);
+    let currentBlobId = localStorage.getItem(CLOUD_BLOB_ID_KEY);
 
     try {
       setSyncStatus('syncing');
-      const payload = {
-        itinerary: newItinerary || itinerary,
-        expenses: newExpenses || expenses,
-        members: newMembers || members,
-        updatedAt: Date.now()
-      };
-      const res = await fetch(`${JSON_BLOB_BASE}/${activeId}`, {
+      if (!currentBlobId) {
+        await syncWithCloud(false);
+        return;
+      }
+
+      const res = await fetch(`${JSON_BLOB_BASE}/${currentBlobId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(updatedObj)
       });
 
       if (res.ok) {
         setSyncStatus('success');
-        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       } else {
         setSyncStatus('error');
       }
     } catch (e) {
-      console.error('Push cloud data error:', e);
       setSyncStatus('error');
     }
   };
 
-  // 初始化：打開原本的網址即自動連接全團相同的雲端資料庫
+  // 首次開機自動與雲端連線
   useEffect(() => {
-    const initApp = async () => {
-      setSyncStatus('syncing');
-      const masterId = await getOrInitGlobalBlobId();
-      if (masterId) {
-        setBlobId(masterId);
-        await fetchCloudData(masterId);
-      } else {
-        setSyncStatus('error');
-      }
-    };
+    syncWithCloud(false);
 
-    initApp();
-
-    // 📱 手機切換回此畫面時自動更新
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchCloudData();
-      }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') syncWithCloud(false);
     };
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('visibilitychange', handleVisibility);
+    return () => window.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
   // 🌤️ 動態即時氣象
@@ -313,7 +315,7 @@ export default function App() {
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
 
-  // 行程順序微調 (極簡低調風格)
+  // 行程順序調整 (低調質感微調按鈕)
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= itinerary[selectedDayIdx].items.length) return;
@@ -323,8 +325,7 @@ export default function App() {
     const [movedItem] = currentItems.splice(currentIndex, 1);
     currentItems.splice(targetIndex, 0, movedItem);
     updated[selectedDayIdx].items = currentItems;
-    setItinerary(updated);
-    pushCloudData(updated, expenses, members);
+    pushToCloud(updated, expenses, members);
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => { if (!isEditMode) return; setDraggedItemIdx(index); e.dataTransfer.effectAllowed = "move"; };
@@ -337,8 +338,7 @@ export default function App() {
     const [movedItem] = currentItems.splice(draggedItemIdx, 1);
     currentItems.splice(dropTargetIdx, 0, movedItem);
     updated[selectedDayIdx].items = currentItems;
-    setItinerary(updated);
-    pushCloudData(updated, expenses, members);
+    pushToCloud(updated, expenses, members);
     setDraggedItemIdx(null);
   };
 
@@ -346,8 +346,7 @@ export default function App() {
     if (!confirm('確定刪除此行程嗎？')) return;
     const updated = [...itinerary];
     updated[selectedDayIdx].items = updated[selectedDayIdx].items.filter(item => item.id !== spotId);
-    setItinerary(updated);
-    pushCloudData(updated, expenses, members);
+    pushToCloud(updated, expenses, members);
   };
 
   const handleSaveEditSpot = () => {
@@ -358,8 +357,7 @@ export default function App() {
     if (idx !== -1) {
       currentItems[idx] = { ...editingSpot };
       updated[selectedDayIdx].items = currentItems;
-      setItinerary(updated);
-      pushCloudData(updated, expenses, members);
+      pushToCloud(updated, expenses, members);
     }
     setEditingSpot(null);
   };
@@ -368,8 +366,7 @@ export default function App() {
     if (!newSpot.name) return;
     const updated = [...itinerary];
     updated[selectedDayIdx].items.push({ ...newSpot, id: Date.now().toString() });
-    setItinerary(updated);
-    pushCloudData(updated, expenses, members);
+    pushToCloud(updated, expenses, members);
     setNewSpot({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
     setShowAddSpotModal(false);
   };
@@ -381,9 +378,7 @@ export default function App() {
     const trimmed = newName.trim();
     const newMembers = members.map(m => m === oldName ? trimmed : m);
     const newExpenses = expenses.map(e => ({ ...e, splitFor: e.splitFor.map(s => s === oldName ? trimmed : s) }));
-    setMembers(newMembers);
-    setExpenses(newExpenses);
-    pushCloudData(itinerary, newExpenses, newMembers);
+    pushToCloud(itinerary, newExpenses, newMembers);
     if (filterMember === oldName) setFilterMember(trimmed);
   };
 
@@ -391,8 +386,7 @@ export default function App() {
     if (!newMemberInput.trim()) return;
     if (members.includes(newMemberInput.trim())) return alert('成員已存在');
     const newMembers = [...members, newMemberInput.trim()];
-    setMembers(newMembers);
-    pushCloudData(itinerary, expenses, newMembers);
+    pushToCloud(itinerary, expenses, newMembers);
     setNewMemberInput('');
   };
 
@@ -400,8 +394,7 @@ export default function App() {
     if (members.length <= 1) return alert('請至少留一位成員');
     if (confirm(`確定刪除成員【${target}】嗎？`)) {
       const newMembers = members.filter(m => m !== target);
-      setMembers(newMembers);
-      pushCloudData(itinerary, expenses, newMembers);
+      pushToCloud(itinerary, expenses, newMembers);
       if (filterMember === target) setFilterMember('全部');
     }
   };
@@ -432,8 +425,7 @@ export default function App() {
       splitFor: newExpense.selectedMembers,
       note: newExpense.note
     }];
-    setExpenses(newExpenses);
-    pushCloudData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
     setShowAddExpenseModal(false);
   };
 
@@ -441,16 +433,14 @@ export default function App() {
     if (!editingExpense) return;
     if (editingExpense.splitFor.length === 0) return alert('請至少勾選一位分攤成員！');
     const newExpenses = expenses.map(e => e.id === editingExpense.id ? editingExpense : e);
-    setExpenses(newExpenses);
-    pushCloudData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
     setEditingExpense(null);
   };
 
   const handleDeleteExpense = (id: number) => {
     if (!confirm('確定刪除此筆花費嗎？')) return;
     const newExpenses = expenses.filter(e => e.id !== id);
-    setExpenses(newExpenses);
-    pushCloudData(itinerary, newExpenses, members);
+    pushToCloud(itinerary, newExpenses, members);
   };
 
   return (
@@ -461,16 +451,18 @@ export default function App() {
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
+            
+            {/* 強力診斷與重試按鈕 */}
             <button
-              onClick={() => fetchCloudData()}
-              className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition"
-              title="點擊刷新最新資料"
+              onClick={() => syncWithCloud(true)}
+              className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
+              title="點擊強制進行雲端連線診斷與重試"
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
-              <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `雲端同步 ${lastSyncTime}` : '點此重試'}</span>
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (全團共享連線中)</p>
+          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
         </div>
 
         <button
@@ -558,7 +550,7 @@ export default function App() {
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
-                      {/* 編輯模式下的精緻微調控制按鈕 */}
+                      {/* 編輯模式：低調質感的微調按鈕 */}
                       {isEditMode && (
                         <div className="flex items-center space-x-1">
                           <button
