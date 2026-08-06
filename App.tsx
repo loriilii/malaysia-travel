@@ -223,17 +223,6 @@ export default function App() {
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
 
-  // 🕐 頁首即時時鐘
-  const [nowLabel, setNowLabel] = useState('');
-  useEffect(() => {
-    const updateClock = () => {
-      setNowLabel(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: true }));
-    };
-    updateClock();
-    const clockId = setInterval(updateClock, 30000);
-    return () => clearInterval(clockId);
-  }, []);
-
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
 
@@ -490,7 +479,7 @@ export default function App() {
   // UI State
   const [isEditMode, setIsEditMode] = useState(false);
   const [draggedItemIdx, setDraggedItemIdx] = useState<number | null>(null);
-  const [filterMember, setFilterMember] = useState('全部');
+  const [filterMember, setFilterMember] = useState(() => members[0] || '');
   const [newMemberInput, setNewMemberInput] = useState('');
 
   const [editingSpot, setEditingSpot] = useState<any>(null);
@@ -579,7 +568,7 @@ export default function App() {
     if (confirm(`確定刪除成員【${target}】嗎？`)) {
       const newMembers = members.filter(m => m !== target);
       pushToCloud(itinerary, expenses, newMembers);
-      if (filterMember === target) setFilterMember('全部');
+      if (filterMember === target) setFilterMember(newMembers[0] || '');
     }
   };
 
@@ -651,9 +640,11 @@ export default function App() {
     }
   };
 
-  // 花費分頁用：依目前篩選成員計算加總 (馬幣)
-  const filteredExpenses = expenses.filter(e => filterMember === '全部' || e.splitFor.includes(filterMember));
-  const filteredTotalMYR = filteredExpenses.reduce((sum, e) => sum + (e.currency === 'MYR' ? e.amount : 0), 0);
+  // 花費分頁用：依目前選取成員計算「該成員分帳後」的加總，馬幣／台幣分開列計
+  const filteredExpenses = expenses.filter(e => e.splitFor.includes(filterMember));
+  const shareOf = (e: any) => e.amount / (e.splitFor.length || 1);
+  const filteredTotalMYR = filteredExpenses.filter(e => e.currency === 'MYR').reduce((sum, e) => sum + shareOf(e), 0);
+  const filteredTotalTWD = filteredExpenses.filter(e => e.currency === 'TWD').reduce((sum, e) => sum + shareOf(e), 0);
 
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
@@ -666,38 +657,34 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
-        <div>
-          <div className="flex items-center space-x-2">
-            <h1 className="text-lg font-bold tracking-wide">馬來西亞 吉隆坡．檳城</h1>
-            
+      <header className="p-4 text-white shadow-md sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
+        <h1 className="text-lg font-bold tracking-wide whitespace-nowrap overflow-hidden text-ellipsis">馬來西亞 吉隆坡．檳城</h1>
+        <div className="flex items-center justify-between mt-1.5 flex-nowrap">
+          <p className="text-xs whitespace-nowrap" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+          <div className="flex items-center space-x-1.5 flex-nowrap flex-shrink-0">
             <button
               onClick={() => pullFromCloud(true)}
-              className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
+              className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer whitespace-nowrap"
               title={lastSyncTime ? `最後同步時間：${lastSyncTime}（點擊強制拉取全團最新資料）` : '點擊強制拉取全團最新雲端資料'}
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
               <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? '已同步' : '未同步'}</span>
             </button>
 
-            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
+            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer flex-shrink-0" title="實體備份/匯入匯出">
               ⚙️
             </button>
-          </div>
-          <div className="flex items-center space-x-2 mt-0.5">
-            <p className="text-xs" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
-            <span className="text-xs text-slate-300">{nowLabel}</span>
+
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`text-[10px] px-2.5 py-1 rounded-full font-bold border transition shadow-sm cursor-pointer whitespace-nowrap flex-shrink-0 ${
+                isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
+              }`}
+            >
+              {isEditMode ? '✏️ 編輯' : '👁️ 唯讀'}
+            </button>
           </div>
         </div>
-
-        <button
-          onClick={() => setIsEditMode(!isEditMode)}
-          className={`text-[10px] px-3 py-1.5 rounded-full font-bold border transition shadow-sm cursor-pointer ${
-            isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
-          }`}
-        >
-          {isEditMode ? '✏️ 編輯模式' : '👁️ 唯讀模式'}
-        </button>
       </header>
 
       {/* 雲端連線異常時的明顯提示條 */}
@@ -877,6 +864,28 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* 🔔 小叮嚀 - 固定釘選於行前準備底部，唯讀/編輯模式皆顯示 */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10 space-y-3">
+              <h2 className="text-base font-bold" style={{ color: THEME.primary }}>🔔 小叮嚀</h2>
+              <div>
+                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【衣物】</h4>
+                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
+                  <li>室內冷氣通常非常強，建議攜帶薄外套</li>
+                  <li>進入部分宗教場所需遮蓋肩膀與腿部。</li>
+                  <li>檳城香格里拉金沙酒店附設泳池，可攜帶泳衣</li>
+                  <li>檳城喬治敦有許多步行行程，且黑風洞與升旗山皆需大量步行，請攜帶好走的鞋子</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【電子與支付】</h4>
+                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
+                  <li>馬來西亞插座為英式三孔，240V</li>
+                  <li>馬來西亞當地換匯建議攜帶乾淨、無摺痕的千元鈔票</li>
+                  <li>下載 Grab 後，請事先綁定信用卡，方便叫車使用（屆時移動會叫 3 台車，3+3+3 配車）</li>
+                </ul>
+              </div>
+            </div>
           </div>
         )}
 
@@ -907,28 +916,6 @@ export default function App() {
                 </div>
               ))}
             </div>
-
-            {/* 🔔 小叮嚀 - 固定釘選於購買清單底部，唯讀/編輯模式皆顯示 */}
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10 space-y-3">
-              <h2 className="text-base font-bold" style={{ color: THEME.primary }}>🔔 小叮嚀</h2>
-              <div>
-                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【衣物】</h4>
-                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
-                  <li>室內冷氣通常非常強，建議攜帶薄外套</li>
-                  <li>進入部分宗教場所需遮蓋肩膀與腿部。</li>
-                  <li>檳城香格里拉金沙酒店附設泳池，可攜帶泳衣</li>
-                  <li>檳城喬治敦有許多步行行程，且黑風洞與升旗山皆需大量步行，請攜帶好走的鞋子</li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【電子與支付】</h4>
-                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
-                  <li>馬來西亞插座為英式三孔，240V</li>
-                  <li>馬來西亞當地換匯建議攜帶乾淨、無摺痕的千元鈔票</li>
-                  <li>下載 Grab 後，請事先綁定信用卡，方便叫車使用（屆時移動會叫 3 台車，3+3+3 配車）</li>
-                </ul>
-              </div>
-            </div>
           </div>
         )}
 
@@ -955,9 +942,6 @@ export default function App() {
               )}
 
               <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
-                <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 cursor-pointer border-2 ${filterMember === '全部' ? 'bg-slate-800 text-white border-slate-800' : 'bg-gray-100 text-gray-600 border-transparent'}`}>
-                  全部花費
-                </button>
                 {members.map(m => (
                   <div key={m} className={`flex items-center space-x-1 px-2 py-1 rounded-xl flex-shrink-0 border-2 transition ${filterMember === m ? 'bg-amber-100 border-amber-600' : 'bg-gray-100 border-transparent'}`}>
                     <button onClick={() => setFilterMember(m)} className={`text-xs font-bold cursor-pointer ${filterMember === m ? 'text-amber-900 font-extrabold' : 'text-gray-600'}`}>{m}</button>
@@ -971,16 +955,28 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 flex justify-between items-center">
-                <div className="text-xs text-amber-900 font-bold">{filterMember === '全部' ? '全行程累積總花費：' : `【${filterMember}】相關花費加總：`}</div>
-                <div className="text-right">
-                  <div className="text-lg font-black text-amber-900">
-                    ${filteredTotalMYR} <span className="text-xs font-normal">MYR</span>
+              <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 space-y-2">
+                <div className="text-xs text-amber-900 font-bold">【{filterMember}】相關花費加總：</div>
+                {filteredTotalMYR > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-amber-700">馬幣花費</span>
+                    <div className="text-right">
+                      <div className="text-lg font-black text-amber-900">${filteredTotalMYR.toFixed(0)} <span className="text-xs font-normal">MYR</span></div>
+                      {rateInfo.rate && (
+                        <div className="text-[10px] text-amber-700">≈ NT$ {(filteredTotalMYR * rateInfo.rate).toFixed(0)}</div>
+                      )}
+                    </div>
                   </div>
-                  {rateInfo.rate && (
-                    <div className="text-[10px] text-amber-700">≈ NT$ {(filteredTotalMYR * rateInfo.rate).toFixed(0)}</div>
-                  )}
-                </div>
+                )}
+                {filteredTotalTWD > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-amber-700">台幣花費</span>
+                    <div className="text-lg font-black text-amber-900">${filteredTotalTWD.toFixed(0)} <span className="text-xs font-normal">TWD</span></div>
+                  </div>
+                )}
+                {filteredTotalMYR === 0 && filteredTotalTWD === 0 && (
+                  <div className="text-xs text-gray-400 text-center py-1">目前尚無相關花費紀錄</div>
+                )}
               </div>
             </div>
 
@@ -999,22 +995,17 @@ export default function App() {
                         {exp.note && <div className="text-[11px] text-gray-500 mt-0.5">💡 {exp.note}</div>}
                       </div>
                       <div className="text-right">
-                        <div className="font-bold text-amber-900 text-sm">{exp.currency} ${exp.amount}</div>
+                        <div className="font-bold text-amber-900 text-sm">{exp.currency} ${shareOf(exp).toFixed(0)}</div>
                         {exp.currency === 'MYR' && rateInfo.rate && (
-                          <div className="text-[10px] text-gray-400">≈ NT$ {(exp.amount * rateInfo.rate).toFixed(0)}</div>
+                          <div className="text-[10px] text-gray-400">≈ NT$ {(shareOf(exp) * rateInfo.rate).toFixed(0)}</div>
                         )}
                       </div>
                     </div>
 
-                    <div className="pt-1.5 border-t border-gray-200/50 space-y-1">
+                    <div className="flex justify-between items-center pt-1.5 border-t border-gray-200/50">
                       <div className="text-[10px] text-gray-400">全部花費－${exp.amount}</div>
-                      <div className="text-[11px] text-slate-600 font-medium">
-                        {exp.splitFor.map((m: string) => `${m}－$${(exp.amount / exp.splitFor.length).toFixed(0)}`).join('、')}
-                      </div>
                       {isEditMode && (
-                        <div className="text-right">
-                          <button onClick={() => setEditingExpense(exp)} className="text-[10px] text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
-                        </div>
+                        <button onClick={() => setEditingExpense(exp)} className="text-[10px] text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
                       )}
                     </div>
 
