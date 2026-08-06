@@ -485,7 +485,7 @@ export default function App() {
   const [newSpot, setNewSpot] = useState({ name: '', time: '', type: '景點', note: '', map: '', img: '' });
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<any>(null);
-  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], note: '' });
+  const [newExpense, setNewExpense] = useState({ item: '', amount: '', currency: 'MYR', selectedMembers: [] as string[], splitMode: 'equal' as 'equal' | 'custom', customAmounts: {} as Record<string, string>, note: '' });
 
   // 行程順序微調
   const handleMoveSpot = (currentIndex: number, direction: 'up' | 'down') => {
@@ -604,34 +604,128 @@ export default function App() {
       item: '',
       amount: '',
       currency: 'MYR',
-      selectedMembers: [...members],
+      selectedMembers: [],
+      splitMode: 'equal',
+      customAmounts: {},
       note: ''
     });
     setShowAddExpenseModal(true);
   };
 
+  const toggleNewExpenseMember = (m: string) => {
+    setNewExpense(prev => {
+      const has = prev.selectedMembers.includes(m);
+      const selectedMembers = has ? prev.selectedMembers.filter(x => x !== m) : [...prev.selectedMembers, m];
+      const customAmounts = { ...prev.customAmounts };
+      if (has) delete customAmounts[m];
+      else if (customAmounts[m] === undefined) customAmounts[m] = '';
+      return { ...prev, selectedMembers, customAmounts };
+    });
+  };
+
+  const applyEqualSplitToNewExpense = () => {
+    const total = parseFloat(newExpense.amount);
+    if (isNaN(total) || newExpense.selectedMembers.length === 0) return;
+    const per = (total / newExpense.selectedMembers.length).toFixed(2);
+    const customAmounts = { ...newExpense.customAmounts };
+    newExpense.selectedMembers.forEach(m => { customAmounts[m] = per; });
+    setNewExpense({ ...newExpense, customAmounts });
+  };
+
   const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newExpense.item || !newExpense.amount) return;
+    if (!newExpense.item) return alert('請輸入花費項目');
     if (newExpense.selectedMembers.length === 0) return alert('請至少勾選一位分攤成員！');
+
+    let shares: Record<string, number> = {};
+    let totalAmount = 0;
+
+    if (newExpense.splitMode === 'custom') {
+      newExpense.selectedMembers.forEach(m => {
+        const v = parseFloat(newExpense.customAmounts[m]) || 0;
+        shares[m] = v;
+        totalAmount += v;
+      });
+      if (totalAmount <= 0) return alert('請輸入每人分攤的金額（或改用「平均分攤」快速帶入）');
+    } else {
+      if (!newExpense.amount) return alert('請輸入金額');
+      totalAmount = parseFloat(newExpense.amount);
+      const per = totalAmount / newExpense.selectedMembers.length;
+      newExpense.selectedMembers.forEach(m => { shares[m] = per; });
+    }
 
     const newExpenses = [...expenses, {
       id: Date.now(),
       date: itinerary[selectedDayIdx].day.split(' ')[0],
       item: newExpense.item,
-      amount: parseFloat(newExpense.amount),
+      amount: Math.round(totalAmount * 100) / 100,
       currency: newExpense.currency,
       splitFor: newExpense.selectedMembers,
+      shares,
       note: newExpense.note
     }];
     pushToCloud(itinerary, newExpenses, members);
     setShowAddExpenseModal(false);
   };
 
+  // 判斷現有花費是否為「均分」，決定編輯視窗預設顯示模式
+  const isUniformShares = (shares: Record<string, number>) => {
+    const vals = Object.values(shares);
+    if (vals.length <= 1) return true;
+    return vals.every(v => Math.abs(v - vals[0]) < 0.01);
+  };
+
+  const openEditExpense = (exp: any) => {
+    const shares: Record<string, number> = exp.shares || Object.fromEntries(exp.splitFor.map((m: string) => [m, exp.amount / (exp.splitFor.length || 1)]));
+    const customAmounts: Record<string, string> = {};
+    exp.splitFor.forEach((m: string) => { customAmounts[m] = String(Math.round((shares[m] || 0) * 100) / 100); });
+    setEditingExpense({ ...exp, splitMode: isUniformShares(shares) ? 'equal' : 'custom', customAmounts });
+  };
+
+  const toggleEditExpenseMember = (m: string) => {
+    setEditingExpense((prev: any) => {
+      const has = prev.splitFor.includes(m);
+      const splitFor = has ? prev.splitFor.filter((x: string) => x !== m) : [...prev.splitFor, m];
+      const customAmounts = { ...prev.customAmounts };
+      if (has) delete customAmounts[m];
+      else if (customAmounts[m] === undefined) customAmounts[m] = '';
+      return { ...prev, splitFor, customAmounts };
+    });
+  };
+
+  const applyEqualSplitToEditExpense = () => {
+    const total = parseFloat(editingExpense.amount);
+    if (isNaN(total) || editingExpense.splitFor.length === 0) return;
+    const per = (total / editingExpense.splitFor.length).toFixed(2);
+    const customAmounts = { ...editingExpense.customAmounts };
+    editingExpense.splitFor.forEach((m: string) => { customAmounts[m] = per; });
+    setEditingExpense({ ...editingExpense, customAmounts });
+  };
+
   const handleSaveEditExpense = () => {
     if (!editingExpense) return;
     if (editingExpense.splitFor.length === 0) return alert('請至少勾選一位分攤成員！');
-    const newExpenses = expenses.map(e => e.id === editingExpense.id ? editingExpense : e);
+
+    const shares: Record<string, number> = {};
+    let totalAmount = 0;
+    editingExpense.splitFor.forEach((m: string) => {
+      const v = parseFloat(editingExpense.customAmounts[m]) || 0;
+      shares[m] = v;
+      totalAmount += v;
+    });
+    if (totalAmount <= 0) return alert('請輸入每人分攤的金額（或改用「平均分攤」快速帶入）');
+
+    const finalExpense = {
+      id: editingExpense.id,
+      date: editingExpense.date,
+      item: editingExpense.item,
+      amount: Math.round(totalAmount * 100) / 100,
+      currency: editingExpense.currency,
+      splitFor: editingExpense.splitFor,
+      shares,
+      note: editingExpense.note
+    };
+    const newExpenses = expenses.map(e => e.id === editingExpense.id ? finalExpense : e);
     pushToCloud(itinerary, newExpenses, members);
     setEditingExpense(null);
   };
