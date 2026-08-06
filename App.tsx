@@ -9,7 +9,7 @@ const THEME = {
 };
 
 // ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
-const FIXED_FIREBASE_URL = "https://trip-app-malaysia-default-rtdb.firebaseio.com/master_trip.json";
+const FIXED_FIREBASE_URL = "https://malaysia-trip-2026-ec3e3-default-rtdb.asia-southeast1.firebasedatabase.app/master_trip.json";
 const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
 
 // 自動輪詢間隔 (毫秒) - 讓多裝置間更接近「即時」同步
