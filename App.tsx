@@ -570,6 +570,34 @@ export default function App() {
     }
   };
 
+  // 成員排序：拖移 (桌機) + 上下箭頭 (手機更穩定好用)
+  const [draggedMemberIdx, setDraggedMemberIdx] = useState<number | null>(null);
+
+  const handleMoveMember = (currentIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= members.length) return;
+    const newMembers = [...members];
+    const [moved] = newMembers.splice(currentIndex, 1);
+    newMembers.splice(targetIndex, 0, moved);
+    pushToCloud(itinerary, expenses, newMembers);
+  };
+
+  const handleMemberDragStart = (e: React.DragEvent, index: number) => {
+    if (!isEditMode) return;
+    setDraggedMemberIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const handleMemberDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleMemberDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (!isEditMode || draggedMemberIdx === null || draggedMemberIdx === dropIndex) return;
+    const newMembers = [...members];
+    const [moved] = newMembers.splice(draggedMemberIdx, 1);
+    newMembers.splice(dropIndex, 0, moved);
+    pushToCloud(itinerary, expenses, newMembers);
+    setDraggedMemberIdx(null);
+  };
+
   // 花費管理
   const handleOpenAddExpense = () => {
     setNewExpense({
@@ -939,13 +967,23 @@ export default function App() {
                 </div>
               )}
 
-              <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
-                {members.map(m => (
-                  <div key={m} className={`flex items-center space-x-1 px-2 py-1 rounded-xl flex-shrink-0 border-2 transition ${filterMember === m ? 'bg-amber-100 border-amber-600' : 'bg-gray-100 border-transparent'}`}>
+              <div className="flex flex-wrap gap-2">
+                {members.map((m, mIdx) => (
+                  <div
+                    key={m}
+                    draggable={isEditMode}
+                    onDragStart={(e) => handleMemberDragStart(e, mIdx)}
+                    onDragOver={handleMemberDragOver}
+                    onDrop={(e) => handleMemberDrop(e, mIdx)}
+                    className={`flex items-center space-x-1 px-2 py-1 rounded-xl border-2 transition ${filterMember === m ? 'bg-amber-100 border-amber-600' : 'bg-gray-100 border-transparent'} ${isEditMode ? 'cursor-move' : ''}`}
+                  >
+                    {isEditMode && <span className="text-gray-300 text-xs">⠿</span>}
                     <button onClick={() => setFilterMember(m)} className={`text-xs font-bold cursor-pointer ${filterMember === m ? 'text-amber-900 font-extrabold' : 'text-gray-600'}`}>{m}</button>
                     {isEditMode && (
                       <>
-                        <button onClick={() => handleRenameMember(m)} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold ml-1 cursor-pointer">✏️</button>
+                        <button onClick={() => handleMoveMember(mIdx, 'up')} disabled={mIdx === 0} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold disabled:opacity-20 cursor-pointer">▲</button>
+                        <button onClick={() => handleMoveMember(mIdx, 'down')} disabled={mIdx === members.length - 1} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold disabled:opacity-20 cursor-pointer">▼</button>
+                        <button onClick={() => handleRenameMember(m)} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold cursor-pointer">✏️</button>
                         <button onClick={() => handleDeleteMember(m)} className="text-gray-300 hover:text-gray-600 text-[10px] font-bold cursor-pointer">✕</button>
                       </>
                     )}
