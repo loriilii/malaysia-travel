@@ -1327,7 +1327,7 @@ export default function App() {
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？(預設全選)</label>
+              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？</label>
               <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
                 {members.map(m => (
                   <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
