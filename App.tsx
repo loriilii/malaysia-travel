@@ -351,6 +351,7 @@ export default function App() {
   }, []);
 
   // 🌤️ 動態即時氣象 (若尚無可靠預報資料，不顯示假資料，改顯示提示文字)
+  // 注意：只在「切換日期分頁」時才重新抓取／捲動，避免雲端輪詢造成畫面一直跳回目前時間
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
   const [weatherStatus, setWeatherStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading');
 
@@ -381,6 +382,14 @@ export default function App() {
           if (list.length === 24) {
             setHourlyWeather(list);
             setWeatherStatus('ok');
+            // 只在這次抓取完成時捲動一次到目前時間，之後不會再自動跳動
+            const klHour = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour: '2-digit', hour12: false }).format(new Date()), 10);
+            const nearestIdx = list.findIndex(hw => parseInt(hw.time.split(':')[0], 10) === klHour);
+            const idx = nearestIdx >= 0 ? nearestIdx : 0;
+            setTimeout(() => {
+              const el = document.getElementById(`weather-hour-${idx}`);
+              if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }, 150);
           } else {
             setWeatherStatus('unavailable');
           }
@@ -389,19 +398,8 @@ export default function App() {
         }
       })
       .catch(() => setWeatherStatus('unavailable'));
-  }, [selectedDayIdx, itinerary]);
-
-  // 天氣資料就緒後，自動橫向捲動到最接近「現在」的時段 (以馬來西亞時區為準)
-  useEffect(() => {
-    if (weatherStatus !== 'ok') return;
-    const klHour = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour: '2-digit', hour12: false }).format(new Date()), 10);
-    const nearestIdx = hourlyWeather.findIndex(hw => parseInt(hw.time.split(':')[0], 10) === klHour);
-    const idx = nearestIdx >= 0 ? nearestIdx : 0;
-    const el = document.getElementById(`weather-hour-${idx}`);
-    if (el) {
-      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }), 150);
-    }
-  }, [weatherStatus, hourlyWeather]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDayIdx]);
 
   // 💱 馬幣 ↔ 台幣 即時匯率換算工具
   const [rateInfo, setRateInfo] = useState<{ rate: number | null; updatedAt: string; error: boolean }>(() => {
