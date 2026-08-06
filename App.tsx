@@ -9,7 +9,7 @@ const THEME = {
 };
 
 // ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
-const FIXED_FIREBASE_URL = "https://malaysia-trip-2026-ec3e3-default-rtdb.asia-southeast1.firebasedatabase.app/master_trip.json";
+const FIXED_FIREBASE_URL = "https://trip-app-malaysia-default-rtdb.firebaseio.com/master_trip.json";
 const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
 
 // 自動輪詢間隔 (毫秒) - 讓多裝置間更接近「即時」同步
@@ -31,7 +31,7 @@ const DEFAULT_HOURLY_WEATHER = [
   { time: "21:00", temp: "27°", rain: "10%", icon: "🌙" }
 ];
 
-// 預設 8 天行程
+// 完整 8 天行程 (依據使用者提供的行程表整理，景點皆補上簡介)
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
@@ -40,65 +40,114 @@ const MASTER_ITINERARY = [
       { id: "1-2", time: "08:45 - 13:25", name: "華航 CI72 航班 (08:45 起飛 → 13:25 抵達)", type: "交通", note: "抵達吉隆坡國際機場", map: "", img: "" },
       { id: "1-3", time: "14:20 - 15:10", name: "【機場快線】機場 → 市區", type: "交通", note: "車程約 30 分鐘", map: "", img: "" },
       { id: "1-4", time: "15:10 - 16:00", name: "Check-in｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "遠東集團酒店式公寓辦理入住", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=600&q=80" },
-      { id: "1-5", time: "16:55 - 18:45", name: "黑風洞 (Batu Caves)", type: "景點", note: "272 階彩虹階梯，請著過膝長褲/裙", map: "https://maps.app.goo.gl/4VH85Uz17DKdey1b6", img: "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?auto=format&fit=crop&w=600&q=80" },
-      { id: "1-6", time: "20:10 - 22:00", name: "【晚餐】麗豐啦啦米 / 亞羅街美食街", type: "飲食", note: "必吃鮮味啦啦米粉與燒雞翅", map: "https://maps.app.goo.gl/doRqhPSg5X6EmYaJ8", img: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80" }
+      { id: "1-5", time: "16:00 - 16:55", name: "【火車 / Grab】前往黑風洞", type: "交通", note: "可搭乘 Seremban Line 火車往 Batu Caves 方向", map: "", img: "" },
+      { id: "1-6", time: "16:55 - 18:45", name: "黑風洞 (Batu Caves)", type: "景點", note: "供奉印度教戰神穆魯干的石灰岩山洞聖地，272 階彩虹階梯是熱門拍照地標，內部主洞穴挑高巨大、終年香煙裊裊。營業時間 07:00-21:00，請著過膝長褲/裙入內。", map: "https://maps.app.goo.gl/4VH85Uz17DKdey1b6", img: "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?auto=format&fit=crop&w=600&q=80" },
+      { id: "1-7", time: "18:45 - 19:30", name: "附近下午茶", type: "飲食", note: "黑風洞周邊稍作休息、補充水分", map: "", img: "" },
+      { id: "1-8", time: "19:30 - 20:10", name: "【火車 / Grab】前往亞羅街", type: "交通", note: "", map: "", img: "" },
+      { id: "1-9", time: "20:10 - 22:00", name: "【晚餐】麗豐啦啦米 / 亞羅街美食街", type: "飲食", note: "必吃鮮味啦啦米粉與燒雞翅", map: "https://maps.app.goo.gl/doRqhPSg5X6EmYaJ8", img: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80" },
+      { id: "1-10", time: "22:00 - 22:30", name: "吉隆坡城中城公園 (KLCC Park)", type: "景點", note: "位於雙子星塔正下方的都市綠洲，夜晚可近距離仰望雙子星塔燈光與噴泉水舞秀，是拍攝地標夜景的經典角度。", map: "https://maps.app.goo.gl/3Jg9NDVbQwaUjGVq6", img: "" },
+      { id: "1-11", time: "22:30 -", name: "Rest｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "返回酒店休息", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" }
     ]
   },
   {
-    day: "8/16 Sun.", title: "馬六甲古城巡禮", city: "馬六甲", lat: 2.1896, lng: 102.2501,
+    day: "8/16 Sun.", title: "布城 & 馬六甲古城巡禮", city: "馬六甲", lat: 2.1896, lng: 102.2501,
     items: [
-      { id: "2-1", time: "09:30", name: "包車前往馬六甲古城", type: "交通", note: "9:30 集合包車出發", map: "", img: "" },
-      { id: "2-2", time: "停留", name: "粉紅清真寺 & 布特拉橋", type: "景點", note: "拍照打卡水上粉紅清真寺", map: "", img: "https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=600&q=80" },
-      { id: "2-3", time: "停留", name: "荷蘭紅屋 & 聖地牙哥城堡", type: "景點", note: "漫步紅屋廣場", map: "", img: "https://images.unsplash.com/photo-1590001155093-a3c66ab0c3ff?auto=format&fit=crop&w=600&q=80" },
-      { id: "2-4", time: "晚上", name: "雞場街夜市 (Jonker Street)", type: "景點", note: "週末夜市與海南雞飯粒", map: "", img: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=600&q=80" }
+      { id: "2-1", time: "08:30 - 09:30", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "2-2", time: "09:30 - 10:00", name: "包車出發，前往布城 (Putrajaya)", type: "交通", note: "車程約 30 分鐘", map: "", img: "" },
+      { id: "2-3", time: "10:00 - 10:45", name: "粉紅清真寺 (布城水上清真寺)", type: "景點", note: "座落於布城人工湖畔，以粉紅色花崗岩打造而成，故有「粉紅清真寺」之稱，是馬來西亞極具代表性的水上清真寺。", map: "", img: "https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=600&q=80" },
+      { id: "2-4", time: "10:45 - 11:15", name: "布特拉橋 (Putra Bridge)", type: "景點", note: "仿阿拉伯風格設計的五拱橋，橫跨布城湖，橋上可眺望粉紅清真寺與布城的行政建築群。", map: "", img: "" },
+      { id: "2-5", time: "11:15 - 13:45", name: "【包車移動】前往馬六甲", type: "交通", note: "車程約 2.5 小時", map: "", img: "" },
+      { id: "2-6", time: "13:45 - 14:15", name: "馬六甲海峽清真寺", type: "景點", note: "建於人工島上的水上清真寺，漲潮時彷彿漂浮於馬六甲海峽海面上，是欣賞海峽日落的知名地點。", map: "", img: "" },
+      { id: "2-7", time: "14:15 - 14:45", name: "【包車移動】前往馬六甲古城區", type: "交通", note: "車程約 30 分鐘", map: "", img: "" },
+      { id: "2-8", time: "14:45 - 16:15", name: "荷蘭紅屋 & 聖地牙哥城堡", type: "景點", note: "荷蘭紅屋 (Stadthuys) 是東南亞現存最古老的荷蘭建築群，磚紅色外牆極具特色；聖地牙哥城堡 (A Famosa) 則是 16 世紀葡萄牙人所建城堡的遺跡，兩者皆為馬六甲世界文化遺產的重要地標。", map: "", img: "https://images.unsplash.com/photo-1590001155093-a3c66ab0c3ff?auto=format&fit=crop&w=600&q=80" },
+      { id: "2-9", time: "19:00 - 22:00", name: "雞場街夜市 (Jonker Street)", type: "景點", note: "馬六甲最熱鬧的週末夜市，沿街可品嚐娘惹糕點、海南雞飯粒等在地小吃，也能挖寶古董與手工藝品，晚餐可於此解決。", map: "", img: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=600&q=80" },
+      { id: "2-10", time: "22:00 - 00:30", name: "【包車移動】返回吉隆坡", type: "交通", note: "車程約 2.5 小時", map: "", img: "" },
+      { id: "2-11", time: "00:30 -", name: "Rest｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "返回酒店休息", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" }
     ]
   },
   {
     day: "8/17 Mon.", title: "吉隆坡城市漫遊", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
     items: [
-      { id: "3-1", time: "09:30", name: "Ready｜吉隆坡豪亞酒店式公寓 (收拾行李)", type: "住宿", note: "當晚需換房，請收好行李", map: "", img: "" },
-      { id: "3-2", time: "10:30 - 12:00", name: "樂聖嶺天后宮", type: "景點", note: "東南亞最大媽祖廟，燈籠陣打卡點", map: "", img: "" },
-      { id: "3-3", time: "14:45 - 16:30", name: "中央市場 (Central Market)", type: "景點", note: "文創手作市集", map: "https://maps.app.goo.gl/smpbQKkoT5YwFAGq7", img: "" },
-      { id: "3-4", time: "16:30 - 21:30", name: "柏威年廣場 (Pavilion) / 亞羅街", type: "景點", note: "晚餐 + 百貨逛街換匯", map: "https://maps.app.goo.gl/Rf7sEgBUhrixPdx97", img: "" }
+      { id: "3-1", time: "09:00 - 09:30", name: "Ready｜吉隆坡豪亞酒店式公寓 (收拾行李)", type: "住宿", note: "當晚需換房，請收好行李", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" },
+      { id: "3-2", time: "09:30 - 10:30", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "3-3", time: "10:30 - 12:00", name: "樂聖嶺天后宮", type: "景點", note: "建於樂聖嶺上的媽祖廟，是東南亞規模數一數二的中式廟宇建築，六角形主殿搭配上千盞紅燈籠，是熱門的祈福與拍照景點。", map: "", img: "" },
+      { id: "3-4", time: "12:00 - 13:30", name: "獨立廣場 (Merdeka Square)", type: "景點", note: "1957 年馬來西亞在此宣布獨立，廣場周邊環繞著英式殖民時期的摩爾式建築，草坪上的旗桿曾是全球最高的旗桿之一。", map: "", img: "" },
+      { id: "3-5", time: "13:30 - 14:45", name: "【午餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "3-6", time: "14:45 - 16:30", name: "中央市場 (Central Market)", type: "景點", note: "建於 1888 年的 Art Deco 風格建築，現已改建為文創手作與紀念品市集，是感受馬來西亞多元文化與選購伴手禮的好去處。營業時間 10:00-22:00。", map: "https://maps.app.goo.gl/smpbQKkoT5YwFAGq7", img: "" },
+      { id: "3-7", time: "16:30 - 19:00", name: "柏威年廣場 (Pavilion KL)", type: "景點", note: "武吉免登 (Bukit Bintang) 區的指標型高端百貨，聚集眾多國際精品與美食餐廳，是吉隆坡最熱門的購物地標之一。", map: "https://maps.app.goo.gl/Rf7sEgBUhrixPdx97", img: "" },
+      { id: "3-8", time: "19:00 - 21:30", name: "【晚餐】亞羅街夜市 (Jalan Alor)", type: "飲食", note: "吉隆坡最著名的美食街，入夜後兩側攤販林立、燈火通明，沙嗲、炒粿條、燒雞翅都是必吃美食。", map: "https://maps.app.goo.gl/jzcuhW96KAtXym5C9", img: "" },
+      { id: "3-9", time: "21:30 -", name: "Rest｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" }
     ]
   },
   {
     day: "8/18 Tue.", title: "吉隆坡 → 檳城喬治市", city: "檳城", lat: 5.4141, lng: 100.3288,
     items: [
-      { id: "4-1", time: "09:00 - 10:45", name: "【早餐】chaFei Wisma Cosway 咖椰多士", type: "飲食", note: "美味咖椰吐司", map: "https://maps.app.goo.gl/goNaQNtVyjhxcSERA", img: "" },
-      { id: "4-2", time: "11:40 - 15:15", name: "【火車】吉隆坡中央車站 → 檳城北海車站", type: "交通", note: "乘坐 ETS 高速火車", map: "", img: "" },
-      { id: "4-3", time: "16:00 - 16:20", name: "【渡輪】前往喬治市", type: "交通", note: "渡輪搭乘", map: "", img: "" },
-      { id: "4-4", time: "17:30 - 18:20", name: "姓氏橋 (Clan Jetties)", type: "景點", note: "體驗水上人家生活、觀賞落日夕陽", map: "https://maps.app.goo.gl/E5ENPqHFHnBiiUeb9", img: "https://images.unsplash.com/photo-1528181304800-259b08848526?auto=format&fit=crop&w=600&q=80" },
-      { id: "4-5", time: "19:30 -", name: "逛超市 Giant Penang Plaza", type: "景點", note: "採買零食伴手禮", map: "https://maps.app.goo.gl/zi2r7GcbqgAFeX4A6", img: "" }
+      { id: "4-1", time: "09:00", name: "Ready｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "收拾行李準備退房", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" },
+      { id: "4-2", time: "09:00 - 10:45", name: "【早餐】chaFei Wisma Cosway 咖椰多士", type: "飲食", note: "美味咖椰吐司", map: "https://maps.app.goo.gl/goNaQNtVyjhxcSERA", img: "" },
+      { id: "4-3", time: "10:45 - 11:00", name: "Check-out｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" },
+      { id: "4-4", time: "11:00 - 11:15", name: "【步行】前往吉隆坡中央車站", type: "交通", note: "步行約 15 分鐘", map: "", img: "" },
+      { id: "4-5", time: "11:40 - 15:15", name: "【火車】吉隆坡中央車站 → 檳城北海車站", type: "交通", note: "乘坐 ETS 高速火車，車票已購買", map: "", img: "" },
+      { id: "4-6", time: "15:15 - 15:40", name: "【步行】前往渡輪站 Penang Sentral", type: "交通", note: "", map: "", img: "" },
+      { id: "4-7", time: "16:00 - 16:20", name: "【渡輪】前往喬治市", type: "交通", note: "", map: "", img: "" },
+      { id: "4-8", time: "16:20 - 17:00", name: "Check-in｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
+      { id: "4-9", time: "17:30 - 18:20", name: "姓氏橋 (Clan Jetties)", type: "景點", note: "喬治市沿海而建的水上木屋聚落，由不同姓氏的華人家族世代居住而得名，是聯合國教科文組織世界遺產的一部分，傍晚時分是欣賞日落的絕佳地點。", map: "https://maps.app.goo.gl/E5ENPqHFHnBiiUeb9", img: "https://images.unsplash.com/photo-1528181304800-259b08848526?auto=format&fit=crop&w=600&q=80" },
+      { id: "4-10", time: "18:20 - 19:30", name: "【晚餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "4-11", time: "19:30 -", name: "逛超市 Giant Penang Plaza", type: "景點", note: "採買零食伴手禮", map: "https://maps.app.goo.gl/zi2r7GcbqgAFeX4A6", img: "" }
     ]
   },
   {
     day: "8/19 Wed.", title: "檳城自然探索", city: "檳城", lat: 5.4141, lng: 100.3288,
     items: [
-      { id: "5-1", time: "10:50 - 14:00", name: "升旗山 The Habitat 生態公園", type: "景點", note: "Klook 門票已購買，體驗空中步道", map: "https://maps.app.goo.gl/n3zDSQiEk6sqeCD26", img: "https://images.unsplash.com/photo-1584551246679-0daf3d275d0f?auto=format&fit=crop&w=600&q=80" },
-      { id: "5-2", time: "16:25 - 18:00", name: "葛尼廣場 (Gurney Plaza)", type: "景點", note: "海邊購物中心", map: "", img: "" }
+      { id: "5-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
+      { id: "5-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "5-3", time: "10:50 - 14:00", name: "檳城升旗山 The Habitat 生態公園", type: "景點", note: "搭乘纜車登上檳城最高點升旗山，園區內設有雨林空中步道與觀景台，可俯瞰喬治市與海峽全景，享受涼爽的高地氣候。Klook 門票已購買。", map: "https://maps.app.goo.gl/n3zDSQiEk6sqeCD26", img: "https://images.unsplash.com/photo-1584551246679-0daf3d275d0f?auto=format&fit=crop&w=600&q=80" },
+      { id: "5-4", time: "14:00 - 14:30", name: "【Grab】前往植物園", type: "交通", note: "", map: "", img: "" },
+      { id: "5-5", time: "15:00 - 16:10", name: "檳城植物園 (Penang Botanic Gardens)", type: "景點", note: "又稱瀑布花園，是超過百年歷史的熱帶植物園，園內綠意盎然、隨處可見野生獼猴出沒，是市區內難得的自然喘息角落。", map: "", img: "" },
+      { id: "5-6", time: "16:10 - 16:25", name: "【Grab】前往葛尼廣場", type: "交通", note: "", map: "", img: "" },
+      { id: "5-7", time: "16:25 - 18:00", name: "葛尼廣場 (Gurney Plaza)", type: "景點", note: "鄰近葛尼海濱的大型購物中心，商場林立、餐廳選擇豐富，也是欣賞海濱夕陽的好地點。", map: "", img: "" },
+      { id: "5-8", time: "18:00 -", name: "【晚餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "5-9", time: "夜間", name: "Rest｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" }
     ]
   },
   {
     day: "8/20 Thu.", title: "檳城人文漫遊", city: "檳城", lat: 5.4141, lng: 100.3288,
     items: [
-      { id: "6-1", time: "10:00 - 12:00", name: "張弼士故居 + 娘惹博物館", type: "景點", note: "藍屋與娘惹文化巡禮", map: "", img: "" },
-      { id: "6-2", time: "13:45 - 15:30", name: "喬治市壁畫街 & 小印度", type: "景點", note: "尋找「姐弟共騎」壁畫", map: "", img: "" },
-      { id: "6-3", time: "18:00 - 19:50", name: "光大大廈 68 樓彩虹步道", type: "景點", note: "俯瞰喬治市高空夜景", map: "", img: "" }
+      { id: "6-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
+      { id: "6-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "6-3", time: "10:00 - 12:00", name: "張弼士故居 + 檳島市政廳 + 娘惹博物館", type: "景點", note: "張弼士故居 (藍屋) 是南洋首富張弼士所建的靛藍色豪宅，融合中西建築工藝；娘惹博物館則完整呈現土生華人 (峇峇娘惹) 的生活文化與古董收藏，兩者皆是認識檳城多元文化的重要景點。", map: "", img: "" },
+      { id: "6-4", time: "12:00 - 13:45", name: "【午餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "6-5", time: "13:45 - 15:30", name: "喬治市壁畫街 + 亞美尼亞街 + 小印度", type: "景點", note: "喬治市老街區以街頭壁畫聞名，「姐弟共騎腳踏車」等作品是熱門打卡地標；沿路穿梭至亞美尼亞街與小印度，可感受殖民建築、香料市集與印度廟宇交織的多元風情。", map: "", img: "" },
+      { id: "6-6", time: "15:30 - 16:30", name: "【下午茶】", type: "飲食", note: "", map: "", img: "" },
+      { id: "6-7", time: "16:30 - 18:00", name: "孫中山檳城基地紀念館", type: "景點", note: "孫中山先生早年在檳城策劃革命行動的基地舊址，館內保存當年革命相關文物與史料，見證檳城與辛亥革命的歷史淵源。", map: "", img: "" },
+      { id: "6-8", time: "18:00 - 19:50", name: "光大大廈 68 樓彩虹步道 (Top 68 KOMTAR)", type: "景點", note: "位於檳城地標建築光大大廈頂樓的透明玻璃天空步道，可 360 度俯瞰喬治市與海峽全景，是欣賞日落與夜景的高空景點。已購票。", map: "", img: "" },
+      { id: "6-9", time: "19:50 -", name: "【晚餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "6-10", time: "夜間", name: "Rest｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" }
     ]
   },
   {
     day: "8/21 Fri.", title: "檳城海灘渡假", city: "檳城", lat: 5.4667, lng: 100.2452,
     items: [
-      { id: "7-1", time: "10:30 Check-in", name: "檳城香格里拉金沙酒店", type: "住宿", note: "海灘渡假飯店入住", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=600&q=80" },
-      { id: "7-2", time: "18:00 -", name: "峇都丁宜海灘 (Batu Ferringhi)", type: "景點", note: "觀賞著名落日夕陽", map: "", img: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80" }
+      { id: "7-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "退房前收拾行李", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
+      { id: "7-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "7-3", time: "10:00 - 10:30", name: "【Grab】前往香格里拉金沙酒店", type: "交通", note: "", map: "", img: "" },
+      { id: "7-4", time: "10:30 - 11:00", name: "Check-in｜檳城香格里拉金沙酒店", type: "住宿", note: "海灘渡假飯店入住", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=600&q=80" },
+      { id: "7-5", time: "11:00 - 14:00", name: "熱帶香料花園 (Tropical Spice Garden)", type: "景點", note: "佔地廣闊的熱帶植物園，園內種植數百種香料與藥用植物，沿著林蔭步道漫遊，能認識東南亞香料文化的起源。", map: "", img: "" },
+      { id: "7-6", time: "14:00 - 15:00", name: "【午餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "7-7", time: "15:00 - 18:00", name: "Relax｜檳城香格里拉金沙酒店", type: "住宿", note: "享用飯店設施、休息睡覺", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "" },
+      { id: "7-8", time: "18:00 -", name: "峇都丁宜海灘 (Batu Ferringhi)", type: "景點", note: "檳城最知名的度假海灘，沿岸飯店林立，黃昏時分的落日景色相當迷人，晚上沿海灘也有夜市可逛。", map: "", img: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80" },
+      { id: "7-9", time: "19:30 - 20:30", name: "【晚餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "7-10", time: "夜間", name: "Rest｜檳城香格里拉金沙酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "" }
     ]
   },
   {
     day: "8/22 Sat.", title: "檳城 → 臺灣", city: "檳城", lat: 5.2971, lng: 100.2768,
     items: [
-      { id: "8-1", time: "11:00 - 12:00", name: "前往檳城國際機場", type: "交通", note: "搭乘 Grab 移動前往機場", map: "", img: "" },
-      { id: "8-2", time: "15:10 - 19:55", name: "華航 CI732 (15:10 起飛 → 19:55 抵達)", type: "交通", note: "順利返抵桃園國際機場！", map: "", img: "" }
+      { id: "8-1", time: "08:30 - 09:30", name: "早餐：飯店享用", type: "飲食", note: "", map: "", img: "" },
+      { id: "8-2", time: "09:30 - 11:00", name: "Ready｜檳城香格里拉金沙酒店", type: "住宿", note: "退房、收拾行李", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "" },
+      { id: "8-3", time: "11:00 - 12:00", name: "前往市區用餐地點", type: "交通", note: "", map: "", img: "" },
+      { id: "8-4", time: "12:00 - 13:10", name: "【午餐】", type: "飲食", note: "", map: "", img: "" },
+      { id: "8-5", time: "13:10 - 13:30", name: "前往檳城國際機場", type: "交通", note: "", map: "", img: "" },
+      { id: "8-6", time: "15:10 - 19:55", name: "華航 CI732 (15:10 起飛 → 19:55 抵達)", type: "交通", note: "順利返抵桃園國際機場！", map: "", img: "" }
     ]
   }
 ];
@@ -150,27 +199,40 @@ export default function App() {
   // 📱 個人手機獨立清單 (localStorage)
   const [prepList, setPrepList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_prep');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, cat: "衣物配件", text: "排汗衫 / 薄短袖", done: false },
-      { id: 2, cat: "衣物配件", text: "薄外套 / 防曬罩衫", done: false },
-      { id: 3, cat: "待辦事項", text: "填寫馬來西亞數位入境卡 MDAC (8/13-8/15)", done: false }
+    if (saved) { try { return JSON.parse(saved); } catch (e) {} }
+    const defaultPrepItems = [
+      "輕便透氣衣物", "薄外套 / 防曬罩衫", "泳衣", "好走的涼鞋 / 運動鞋", "雨具", "太陽眼鏡",
+      "行動電源、充電器", "萬用轉接頭", "台幣千元鈔", "下載 Grab，並事先綁定信用卡",
+      "實體 sim 卡", "防蚊液", "防曬乳", "常備藥品"
     ];
+    return defaultPrepItems.map((text, idx) => ({ id: idx + 1, cat: "個人物品", text, done: false }));
   });
   const [newPrepText, setNewPrepText] = useState('');
   const [newPrepCat] = useState('個人物品');
 
   const [shoppingList, setShoppingList] = useState(() => {
     const saved = localStorage.getItem('my_malaysia_shopping');
-    return saved ? JSON.parse(saved) : [
-      { id: 1, name: "舊街場白咖啡 (OldTown)", target: "超市", bought: false },
-      { id: 2, name: "Beryl's 巧克力", target: "專櫃/機場", bought: false }
+    if (saved) { try { return JSON.parse(saved); } catch (e) {} }
+    return [
+      { id: 1, name: "舊街場白咖啡 (OldTown)", bought: false },
+      { id: 2, name: "Beryl's 巧克力", bought: false }
     ];
   });
   const [newShopName, setNewShopName] = useState('');
-  const [newShopTarget, setNewShopTarget] = useState('');
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
+
+  // 🕐 頁首即時時鐘
+  const [nowLabel, setNowLabel] = useState('');
+  useEffect(() => {
+    const updateClock = () => {
+      setNowLabel(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: true }));
+    };
+    updateClock();
+    const clockId = setInterval(updateClock, 30000);
+    return () => clearInterval(clockId);
+  }, []);
 
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
   useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
@@ -299,17 +361,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 🌤️ 動態即時氣象
+  // 🌤️ 動態即時氣象 (若尚無可靠預報資料，不顯示假資料，改顯示提示文字)
   const [hourlyWeather, setHourlyWeather] = useState(DEFAULT_HOURLY_WEATHER);
+  const [weatherStatus, setWeatherStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading');
 
   useEffect(() => {
     const currentDay = itinerary[selectedDayIdx];
     if (!currentDay) return;
 
+    setWeatherStatus('loading');
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentDay.lat}&longitude=${currentDay.lng}&hourly=temperature_2m,precipitation_probability,weathercode&timezone=Asia%2FKuala_Lumpur`)
       .then(res => res.json())
       .then(data => {
-        if (data && data.hourly) {
+        if (data && data.hourly && data.hourly.time && data.hourly.time.length >= 24) {
           const list = [];
           for (let i = 0; i < 24; i++) {
             if (data.hourly.time[i]) {
@@ -325,11 +389,30 @@ export default function App() {
               list.push({ time: hourStr, temp: `${temp}°`, rain: `${rain}%`, icon: icon });
             }
           }
-          if (list.length === 24) setHourlyWeather(list);
+          if (list.length === 24) {
+            setHourlyWeather(list);
+            setWeatherStatus('ok');
+          } else {
+            setWeatherStatus('unavailable');
+          }
+        } else {
+          setWeatherStatus('unavailable');
         }
       })
-      .catch(() => setHourlyWeather(DEFAULT_HOURLY_WEATHER));
+      .catch(() => setWeatherStatus('unavailable'));
   }, [selectedDayIdx, itinerary]);
+
+  // 天氣資料就緒後，自動橫向捲動到最接近「現在」的時段 (以馬來西亞時區為準)
+  useEffect(() => {
+    if (weatherStatus !== 'ok') return;
+    const klHour = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour: '2-digit', hour12: false }).format(new Date()), 10);
+    const nearestIdx = hourlyWeather.findIndex(hw => parseInt(hw.time.split(':')[0], 10) === klHour);
+    const idx = nearestIdx >= 0 ? nearestIdx : 0;
+    const el = document.getElementById(`weather-hour-${idx}`);
+    if (el) {
+      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }), 150);
+    }
+  }, [weatherStatus, hourlyWeather]);
 
   // 💱 馬幣 ↔ 台幣 即時匯率換算工具
   const [rateInfo, setRateInfo] = useState<{ rate: number | null; updatedAt: string; error: boolean }>(() => {
@@ -568,6 +651,10 @@ export default function App() {
     }
   };
 
+  // 花費分頁用：依目前篩選成員計算加總 (馬幣)
+  const filteredExpenses = expenses.filter(e => filterMember === '全部' || e.splitFor.includes(filterMember));
+  const filteredTotalMYR = filteredExpenses.reduce((sum, e) => sum + (e.currency === 'MYR' ? e.amount : 0), 0);
+
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
       
@@ -582,22 +669,25 @@ export default function App() {
       <header className="p-4 text-white shadow-md flex justify-between items-center sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-lg font-bold tracking-wide">馬來西亞 8天7夜</h1>
+            <h1 className="text-lg font-bold tracking-wide">馬來西亞 吉隆坡．檳城</h1>
             
             <button
               onClick={() => pullFromCloud(true)}
               className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer"
-              title="點擊強制拉取全團最新雲端資料"
+              title={lastSyncTime ? `最後同步時間：${lastSyncTime}（點擊強制拉取全團最新資料）` : '點擊強制拉取全團最新雲端資料'}
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
-              <span>{syncStatus === 'syncing' ? '同步中...' : syncStatus === 'success' ? `全團同步 ${lastSyncTime}` : '點此重試'}</span>
+              <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? '已同步' : '未同步'}</span>
             </button>
 
             <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer" title="實體備份/匯入匯出">
               ⚙️
             </button>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: THEME.sand }}>2026.08.15 － 08.22 (Firebase 直連中心)</p>
+          <div className="flex items-center space-x-2 mt-0.5">
+            <p className="text-xs" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
+            <span className="text-xs text-slate-300">{nowLabel}</span>
+          </div>
         </div>
 
         <button
@@ -653,19 +743,28 @@ export default function App() {
             {/* 24 小時動態氣象 */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-md border border-slate-700">
               <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} 即時氣象預報 (00:00 - 23:00)</span>
-                <span className="text-[10px] text-slate-400">橫向滑動 →</span>
+                <span className="text-[11px] font-bold text-slate-300">🌤️ {itinerary[selectedDayIdx].city} {itinerary[selectedDayIdx].day.split(' ')[0]} 氣象預報</span>
+                {weatherStatus === 'ok' && <span className="text-[10px] text-slate-400">橫向滑動 →</span>}
               </div>
-              <div className="flex overflow-x-auto space-x-2.5 pb-1 pt-1 scrollbar-none">
-                {hourlyWeather.map((hw, index) => (
-                  <div key={index} className="flex-shrink-0 flex flex-col items-center justify-between bg-white/10 px-2.5 py-2 rounded-xl min-w-[56px] border border-white/10">
-                    <span className="text-[10px] text-slate-300">{hw.time}</span>
-                    <span className="text-base my-1">{hw.icon}</span>
-                    <span className="text-xs font-bold">{hw.temp}</span>
-                    <span className="text-[9px] text-sky-300">💧{hw.rain}</span>
-                  </div>
-                ))}
-              </div>
+
+              {weatherStatus === 'loading' && (
+                <div className="text-[11px] text-slate-400 py-4 text-center">氣象資料讀取中...</div>
+              )}
+              {weatherStatus === 'unavailable' && (
+                <div className="text-[11px] text-slate-400 py-4 text-center">此日期天氣預報尚不準確，暫不提供顯示</div>
+              )}
+              {weatherStatus === 'ok' && (
+                <div className="flex overflow-x-auto space-x-2.5 pb-1 pt-1 scrollbar-none">
+                  {hourlyWeather.map((hw, index) => (
+                    <div id={`weather-hour-${index}`} key={index} className="flex-shrink-0 flex flex-col items-center justify-between bg-white/10 px-2.5 py-2 rounded-xl min-w-[56px] border border-white/10">
+                      <span className="text-[10px] text-slate-300">{hw.time}</span>
+                      <span className="text-base my-1">{hw.icon}</span>
+                      <span className="text-xs font-bold">{hw.temp}</span>
+                      <span className="text-[9px] text-sky-300">💧{hw.rain}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 行程卡片 */}
@@ -766,11 +865,11 @@ export default function App() {
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm space-y-2">
-              <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🎒 個人檢查清單</h2>
+              <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>檢查清單</h2>
               {prepList.map(item => (
                 <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
                   <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setPrepList(prepList.map(p => p.id === item.id ? {...p, done: !p.done} : p))}>
-                    <span className={`text-sm ${item.done ? 'line-through text-gray-400' : 'font-medium'}`}>
+                    <span className={`text-sm ${item.done ? 'text-gray-400 font-medium' : 'font-medium'}`}>
                       {item.done ? '✅' : '⬜'} {item.text}
                     </span>
                   </div>
@@ -789,28 +888,46 @@ export default function App() {
                 <h3 className="text-xs font-bold text-gray-600">➕ 新增想買伴手禮</h3>
                 <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded">📱 存於您個人手機</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="p-2 text-xs border rounded-xl" />
-                <input type="text" placeholder="購買地點" value={newShopTarget} onChange={e => setNewShopTarget(e.target.value)} className="p-2 text-xs border rounded-xl" />
+              <div className="flex space-x-2">
+                <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
+                <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), bought: false }]); setNewShopName(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+                  新增
+                </button>
               </div>
-              <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), target: newShopTarget.trim() || '超市', bought: false }]); setNewShopName(''); setNewShopTarget(''); }} className="w-full py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
-                新增至清單
-              </button>
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm space-y-2">
-              <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>🛍️ 個人購物清單</h2>
+              <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>購買清單</h2>
               {shoppingList.map(s => (
                 <div key={s.id} className="p-3 bg-white border border-gray-100 rounded-xl flex justify-between items-center">
                   <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? {...item, bought: !item.bought} : item))}>
-                    <div>
-                      <div className={`font-bold text-sm ${s.bought ? 'line-through text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</div>
-                      <div className="text-xs text-gray-400">地點：{s.target}</div>
-                    </div>
+                    <span className={`font-bold text-sm ${s.bought ? 'text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</span>
                   </div>
                   <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                 </div>
               ))}
+            </div>
+
+            {/* 🔔 小叮嚀 - 固定釘選於購買清單底部，唯讀/編輯模式皆顯示 */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10 space-y-3">
+              <h2 className="text-base font-bold" style={{ color: THEME.primary }}>🔔 小叮嚀</h2>
+              <div>
+                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【衣物】</h4>
+                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
+                  <li>室內冷氣通常非常強，建議攜帶薄外套</li>
+                  <li>進入部分宗教場所需遮蓋肩膀與腿部。</li>
+                  <li>檳城香格里拉金沙酒店附設泳池，可攜帶泳衣</li>
+                  <li>檳城喬治敦有許多步行行程，且黑風洞與升旗山皆需大量步行，請攜帶好走的鞋子</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-amber-800 mb-1.5">【電子與支付】</h4>
+                <ul className="text-xs text-gray-600 space-y-1.5 list-disc list-inside leading-relaxed">
+                  <li>馬來西亞插座為英式三孔，240V</li>
+                  <li>馬來西亞當地換匯建議攜帶乾淨、無摺痕的千元鈔票</li>
+                  <li>下載 Grab 後，請事先綁定信用卡，方便叫車使用（屆時移動會叫 3 台車，3+3+3 配車）</li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
@@ -838,12 +955,12 @@ export default function App() {
               )}
 
               <div className="flex overflow-x-auto space-x-2 pb-1 scrollbar-none">
-                <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 cursor-pointer ${filterMember === '全部' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <button onClick={() => setFilterMember('全部')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 cursor-pointer border-2 ${filterMember === '全部' ? 'bg-slate-800 text-white border-slate-800' : 'bg-gray-100 text-gray-600 border-transparent'}`}>
                   全部花費
                 </button>
                 {members.map(m => (
-                  <div key={m} className="flex items-center space-x-1 bg-gray-100 px-2 py-1 rounded-xl flex-shrink-0 border border-gray-200">
-                    <button onClick={() => setFilterMember(m)} className={`text-xs font-bold cursor-pointer ${filterMember === m ? 'text-amber-800 font-extrabold' : 'text-gray-600'}`}>{m}</button>
+                  <div key={m} className={`flex items-center space-x-1 px-2 py-1 rounded-xl flex-shrink-0 border-2 transition ${filterMember === m ? 'bg-amber-100 border-amber-600' : 'bg-gray-100 border-transparent'}`}>
+                    <button onClick={() => setFilterMember(m)} className={`text-xs font-bold cursor-pointer ${filterMember === m ? 'text-amber-900 font-extrabold' : 'text-gray-600'}`}>{m}</button>
                     {isEditMode && (
                       <>
                         <button onClick={() => handleRenameMember(m)} className="text-[10px] text-gray-400 hover:text-gray-700 font-bold ml-1 cursor-pointer">✏️</button>
@@ -856,8 +973,13 @@ export default function App() {
 
               <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 flex justify-between items-center">
                 <div className="text-xs text-amber-900 font-bold">{filterMember === '全部' ? '全行程累積總花費：' : `【${filterMember}】相關花費加總：`}</div>
-                <div className="text-lg font-black text-amber-900">
-                  ${expenses.filter(e => filterMember === '全部' || e.splitFor.includes(filterMember)).reduce((sum, e) => sum + e.amount, 0)} <span className="text-xs font-normal">MYR</span>
+                <div className="text-right">
+                  <div className="text-lg font-black text-amber-900">
+                    ${filteredTotalMYR} <span className="text-xs font-normal">MYR</span>
+                  </div>
+                  {rateInfo.rate && (
+                    <div className="text-[10px] text-amber-700">≈ NT$ {(filteredTotalMYR * rateInfo.rate).toFixed(0)}</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -869,20 +991,30 @@ export default function App() {
               </div>
 
               <div className="space-y-2.5">
-                {expenses.filter(e => filterMember === '全部' || e.splitFor.includes(filterMember)).map(exp => (
-                  <div key={exp.id} className="p-3 bg-gray-50/80 rounded-xl border border-gray-100 relative space-y-1">
+                {filteredExpenses.map(exp => (
+                  <div key={exp.id} className="p-3 bg-gray-50/80 rounded-xl border border-gray-100 relative space-y-1.5">
                     <div className="flex justify-between items-start pr-6">
                       <div>
                         <span className="font-bold text-sm text-slate-800">{exp.item}</span>
                         {exp.note && <div className="text-[11px] text-gray-500 mt-0.5">💡 {exp.note}</div>}
                       </div>
-                      <div className="text-right font-bold text-amber-900 text-sm">{exp.currency} ${exp.amount}</div>
+                      <div className="text-right">
+                        <div className="font-bold text-amber-900 text-sm">{exp.currency} ${exp.amount}</div>
+                        {exp.currency === 'MYR' && rateInfo.rate && (
+                          <div className="text-[10px] text-gray-400">≈ NT$ {(exp.amount * rateInfo.rate).toFixed(0)}</div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex justify-between items-center pt-1 border-t border-gray-200/50 text-[10px]">
-                      <span className="text-gray-400">對象：{exp.splitFor.join(', ')}</span>
+                    <div className="pt-1.5 border-t border-gray-200/50 space-y-1">
+                      <div className="text-[10px] text-gray-400">全部花費－${exp.amount}</div>
+                      <div className="text-[11px] text-slate-600 font-medium">
+                        {exp.splitFor.map((m: string) => `${m}－$${(exp.amount / exp.splitFor.length).toFixed(0)}`).join('、')}
+                      </div>
                       {isEditMode && (
-                        <button onClick={() => setEditingExpense(exp)} className="text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
+                        <div className="text-right">
+                          <button onClick={() => setEditingExpense(exp)} className="text-[10px] text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
+                        </div>
                       )}
                     </div>
 
@@ -1153,10 +1285,10 @@ export default function App() {
         <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[10px]">
           {[
             { id: 'itinerary', name: '行程總覽' },
-            { id: 'prep', name: '行前準備' },
-            { id: 'shopping', name: '購買清單' },
+            { id: 'rate', name: '匯率換算' },
             { id: 'expenses', name: '行程花費' },
-            { id: 'rate', name: '匯率換算' }
+            { id: 'shopping', name: '購買清單' },
+            { id: 'prep', name: '行前準備' }
           ].map(tab => (
             <button
               key={tab.id}
