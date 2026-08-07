@@ -219,12 +219,48 @@ export default function App() {
     ];
   });
   const [newShopName, setNewShopName] = useState('');
+  const [newShopPhoto, setNewShopPhoto] = useState<string | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+
+  // 將拍照/選取的圖片壓縮後轉成 base64，避免手機儲存空間被塞爆
+  const compressImageFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1000;
+          let { width, height } = img;
+          if (width > height && width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+          else if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('no canvas context')); return; }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
 
   useEffect(() => { localStorage.setItem('my_malaysia_prep', JSON.stringify(prepList)); }, [prepList]);
-  useEffect(() => { localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList)); }, [shoppingList]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('my_malaysia_shopping', JSON.stringify(shoppingList));
+    } catch (e) {
+      console.error('shopping localStorage error', e);
+      alert('⚠️ 手機儲存空間可能不足，最新的照片可能無法保存，建議刪除幾張較早的照片後再試一次。');
+    }
+  }, [shoppingList]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -1039,23 +1075,100 @@ export default function App() {
               </div>
               <div className="flex space-x-2">
                 <input type="text" placeholder="商品名稱" value={newShopName} onChange={e => setNewShopName(e.target.value)} className="flex-1 p-2 text-xs border rounded-xl" />
-                <button onClick={() => { if (!newShopName.trim()) return; setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), bought: false }]); setNewShopName(''); }} className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
+                <button
+                  onClick={() => {
+                    if (!newShopName.trim()) return;
+                    setShoppingList([...shoppingList, { id: Date.now(), name: newShopName.trim(), bought: false, photo: newShopPhoto }]);
+                    setNewShopName('');
+                    setNewShopPhoto(null);
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-white rounded-xl shadow cursor-pointer"
+                  style={{ backgroundColor: THEME.accent }}
+                >
                   新增
                 </button>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  id="new-shop-photo-input"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const dataUrl = await compressImageFile(file);
+                      setNewShopPhoto(dataUrl);
+                    } catch (err) { console.error(err); }
+                    e.target.value = '';
+                  }}
+                />
+                <label htmlFor="new-shop-photo-input" className="text-[10px] font-bold text-amber-800 underline cursor-pointer">
+                  📷 拍照 / 選圖記錄 (選填)
+                </label>
+                {newShopPhoto && (
+                  <div className="relative">
+                    <img src={newShopPhoto} className="w-12 h-12 object-cover rounded-lg border border-gray-200" />
+                    <button onClick={() => setNewShopPhoto(null)} className="absolute -top-1.5 -right-1.5 bg-white rounded-full w-4 h-4 flex items-center justify-center text-[9px] shadow border border-gray-200 cursor-pointer">✕</button>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm space-y-2">
               <h2 className="text-base font-bold mb-3" style={{ color: THEME.primary }}>購買清單</h2>
               {shoppingList.map(s => (
-                <div key={s.id} className="p-3 bg-white border border-gray-100 rounded-xl flex justify-between items-center">
-                  <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? {...item, bought: !item.bought} : item))}>
-                    <span className={`font-bold text-sm ${s.bought ? 'text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</span>
+                <div key={s.id} className="p-3 bg-white border border-gray-100 rounded-xl space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center space-x-2 flex-1 cursor-pointer" onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? {...item, bought: !item.bought} : item))}>
+                      <span className={`font-bold text-sm ${s.bought ? 'text-gray-400' : ''}`}>{s.bought ? '✅ ' : '⬜ '}{s.name}</span>
+                    </div>
+                    <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
                   </div>
-                  <button onClick={() => setShoppingList(shoppingList.filter(item => item.id !== s.id))} className="text-gray-300 hover:text-gray-600 font-bold text-xs p-1 cursor-pointer">✕</button>
+
+                  <div className="flex items-center space-x-2 pl-0.5">
+                    {s.photo && (
+                      <img src={s.photo} onClick={() => setPreviewPhoto(s.photo)} className="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-pointer" />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      id={`shop-photo-input-${s.id}`}
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const dataUrl = await compressImageFile(file);
+                          setShoppingList(shoppingList.map(item => item.id === s.id ? { ...item, photo: dataUrl } : item));
+                        } catch (err) { console.error(err); }
+                        e.target.value = '';
+                      }}
+                    />
+                    <label htmlFor={`shop-photo-input-${s.id}`} className="text-[10px] text-amber-800 underline cursor-pointer">
+                      {s.photo ? '重新拍照' : '📷 新增照片'}
+                    </label>
+                    {s.photo && (
+                      <button onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? { ...item, photo: null } : item))} className="text-[10px] text-gray-400 underline cursor-pointer">
+                        移除照片
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* 購買清單照片全螢幕預覽 */}
+        {previewPhoto && (
+          <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
+            <img src={previewPhoto} className="max-w-full max-h-full rounded-xl" />
+            <button onClick={() => setPreviewPhoto(null)} className="absolute top-6 right-6 text-white text-2xl cursor-pointer">✕</button>
           </div>
         )}
 
