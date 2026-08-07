@@ -1477,7 +1477,7 @@ export default function App() {
 
       {/* 底部 Tab */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="max-w-md mx-auto flex justify-around py-3.5 font-bold text-[10px]">
+        <div className="max-w-md mx-auto flex justify-around items-center py-2.5 px-1.5 font-bold text-[13px]">
           {[
             { id: 'itinerary', name: '行程總覽' },
             { id: 'rate', name: '匯率換算' },
@@ -1488,8 +1488,8 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center px-2 py-1.5 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
-              style={{ color: activeTab === tab.id ? THEME.accent : THEME.primary }}
+              className={`flex flex-col items-center px-2 py-2 rounded-xl transition cursor-pointer ${activeTab === tab.id ? 'text-white shadow-md' : 'text-gray-400'}`}
+              style={{ backgroundColor: activeTab === tab.id ? THEME.accent : 'transparent' }}
             >
               <span>{tab.name}</span>
             </button>
