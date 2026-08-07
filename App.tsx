@@ -521,6 +521,16 @@ export default function App() {
     pushToCloud(updatedItinerary, expenses, members);
   };
 
+  const handleDuplicateSpot = (spotId: string) => {
+    const updatedItinerary = deepClone(itinerary);
+    const items = updatedItinerary[selectedDayIdx].items;
+    const idx = items.findIndex((item: any) => item.id === spotId);
+    if (idx === -1) return;
+    const copy = { ...items[idx], id: Date.now().toString() };
+    items.splice(idx + 1, 0, copy);
+    pushToCloud(updatedItinerary, expenses, members);
+  };
+
   const handleSaveEditSpot = () => {
     if (!editingSpot) return;
     const updatedItinerary = deepClone(itinerary);
@@ -762,12 +772,15 @@ export default function App() {
 
   // 花費分頁用：依目前選取成員計算「該成員分帳後」的加總，馬幣／台幣分開列計
   const filteredExpenses = expenses.filter(e => e.splitFor.includes(filterMember));
-  const shareOf = (e: any) => e.amount / (e.splitFor.length || 1);
+  const shareOf = (e: any, member: string = filterMember) => {
+    if (e.shares && e.shares[member] !== undefined) return e.shares[member];
+    return e.amount / (e.splitFor.length || 1);
+  };
   const filteredTotalMYR = filteredExpenses.filter(e => e.currency === 'MYR').reduce((sum, e) => sum + shareOf(e), 0);
   const filteredTotalTWD = filteredExpenses.filter(e => e.currency === 'TWD').reduce((sum, e) => sum + shareOf(e), 0);
 
   return (
-    <div className="max-w-md mx-auto min-h-screen pb-20 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
+    <div className="max-w-md mx-auto min-h-screen pb-28 shadow-2xl relative" style={{ backgroundColor: THEME.bg }}>
       
       {/* 浮動提示 Toast */}
       {toastMsg && (
@@ -777,27 +790,27 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className="p-4 text-white shadow-md sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
+      <header className="px-4 py-5 text-white shadow-md sticky top-0 z-40" style={{ backgroundColor: THEME.primary }}>
         <h1 className="text-lg font-bold tracking-wide whitespace-nowrap overflow-hidden text-ellipsis">馬來西亞 吉隆坡．檳城</h1>
-        <div className="flex items-center justify-between mt-1.5 flex-nowrap">
+        <div className="flex items-center justify-between mt-2.5 flex-nowrap">
           <p className="text-xs whitespace-nowrap" style={{ color: THEME.sand }}>2026.08.15 － 08.22</p>
-          <div className="flex items-center space-x-1.5 flex-nowrap flex-shrink-0">
+          <div className="flex items-center space-x-2 flex-nowrap flex-shrink-0">
             <button
               onClick={() => pullFromCloud(true)}
-              className="text-[10px] bg-white/10 hover:bg-white/20 active:scale-95 px-2 py-1 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer whitespace-nowrap"
+              className="text-[11px] bg-white/10 hover:bg-white/20 active:scale-95 px-2.5 py-1.5 rounded-full text-slate-200 flex items-center space-x-1 border border-white/20 transition cursor-pointer whitespace-nowrap"
               title={lastSyncTime ? `最後同步時間：${lastSyncTime}（點擊強制拉取全團最新資料）` : '點擊強制拉取全團最新雲端資料'}
             >
               <span>{syncStatus === 'syncing' ? '🔄' : syncStatus === 'success' ? '🟢' : '🔴'}</span>
               <span>{syncStatus === 'syncing' ? '同步中' : syncStatus === 'success' ? '已同步' : '未同步'}</span>
             </button>
 
-            <button onClick={() => setShowBackupModal(true)} className="text-xs p-1 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer flex-shrink-0" title="實體備份/匯入匯出">
+            <button onClick={() => setShowBackupModal(true)} className="text-sm p-1.5 bg-white/10 hover:bg-white/20 rounded-full text-slate-200 cursor-pointer flex-shrink-0" title="實體備份/匯入匯出">
               ⚙️
             </button>
 
             <button
               onClick={() => setIsEditMode(!isEditMode)}
-              className={`text-[10px] px-2.5 py-1 rounded-full font-bold border transition shadow-sm cursor-pointer whitespace-nowrap flex-shrink-0 ${
+              className={`text-[11px] px-3 py-1.5 rounded-full font-bold border transition shadow-sm cursor-pointer whitespace-nowrap flex-shrink-0 ${
                 isEditMode ? 'bg-amber-500 text-white border-amber-300' : 'bg-white/20 text-gray-200 border-white/30'
               }`}
             >
@@ -886,7 +899,7 @@ export default function App() {
                   className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-amber-900/10 transition ${isEditMode ? 'ring-1 ring-slate-300' : ''}`}
                 >
                   {spot.img && (
-                    <div className="h-36 w-full overflow-hidden relative">
+                    <div className="w-full aspect-[4/3] overflow-hidden relative">
                       <img src={spot.img} alt={spot.name} className="w-full h-full object-cover" />
                     </div>
                   )}
@@ -900,7 +913,7 @@ export default function App() {
 
                       {/* 編輯模式：微調控制 */}
                       {isEditMode && (
-                        <div className="flex items-center space-x-1">
+                        <div className="flex items-center flex-wrap justify-end gap-1">
                           <button
                             onClick={() => handleMoveSpot(index, 'up')}
                             disabled={index === 0}
@@ -922,6 +935,13 @@ export default function App() {
                             className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition cursor-pointer"
                           >
                             編輯
+                          </button>
+                          <button
+                            onClick={() => handleDuplicateSpot(spot.id)}
+                            className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded text-xs font-medium border border-gray-200 transition cursor-pointer"
+                            title="複製此行程"
+                          >
+                            📋 複製
                           </button>
                           <button
                             onClick={() => handleDeleteSpot(spot.id)}
@@ -1135,7 +1155,7 @@ export default function App() {
                     <div className="flex justify-between items-center pt-1.5 border-t border-gray-200/50">
                       <div className="text-[10px] text-gray-400">全部花費－${exp.amount}</div>
                       {isEditMode && (
-                        <button onClick={() => setEditingExpense(exp)} className="text-[10px] text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
+                        <button onClick={() => openEditExpense(exp)} className="text-[10px] text-amber-800 font-bold underline cursor-pointer">✏️ 編輯明細</button>
                       )}
                     </div>
 
@@ -1312,7 +1332,7 @@ export default function App() {
       {/* 新增花費 Modal */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>➕ 記錄新花費</h3>
               <button onClick={() => setShowAddExpenseModal(false)} className="text-gray-400 font-bold cursor-pointer">✕</button>
@@ -1327,20 +1347,17 @@ export default function App() {
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？</label>
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] font-bold text-gray-500">此筆費用包含哪些成員？</label>
+                <button type="button" onClick={() => setNewExpense({ ...newExpense, selectedMembers: [...members] })} className="text-[10px] font-bold text-amber-800 underline cursor-pointer">全選</button>
+              </div>
               <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
                 {members.map(m => (
                   <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
                     <input
                       type="checkbox"
                       checked={newExpense.selectedMembers.includes(m)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setNewExpense({ ...newExpense, selectedMembers: [...newExpense.selectedMembers, m] });
-                        } else {
-                          setNewExpense({ ...newExpense, selectedMembers: newExpense.selectedMembers.filter(x => x !== m) });
-                        }
-                      }}
+                      onChange={() => toggleNewExpenseMember(m)}
                       className="rounded text-amber-800 focus:ring-amber-800"
                     />
                     <span className="font-medium text-slate-800">{m}</span>
@@ -1348,6 +1365,36 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            {newExpense.selectedMembers.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex bg-gray-100 rounded-lg p-1 text-xs font-bold">
+                  <button type="button" onClick={() => setNewExpense({ ...newExpense, splitMode: 'equal' })} className={`flex-1 py-1.5 rounded-md cursor-pointer transition ${newExpense.splitMode === 'equal' ? 'bg-white shadow text-amber-800' : 'text-gray-400'}`}>平均分攤</button>
+                  <button type="button" onClick={() => setNewExpense({ ...newExpense, splitMode: 'custom' })} className={`flex-1 py-1.5 rounded-md cursor-pointer transition ${newExpense.splitMode === 'custom' ? 'bg-white shadow text-amber-800' : 'text-gray-400'}`}>自訂每人金額</button>
+                </div>
+
+                {newExpense.splitMode === 'custom' && (
+                  <div className="space-y-1.5">
+                    <button type="button" onClick={applyEqualSplitToNewExpense} className="text-[10px] text-amber-800 underline cursor-pointer">⚖️ 用上方金額快速平均帶入</button>
+                    {newExpense.selectedMembers.map(m => (
+                      <div key={m} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+                        <span className="text-xs font-medium text-slate-700">{m}</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={newExpense.customAmounts[m] || ''}
+                          onChange={e => setNewExpense({ ...newExpense, customAmounts: { ...newExpense.customAmounts, [m]: e.target.value } })}
+                          className="w-24 p-1.5 text-xs border rounded-lg text-right"
+                        />
+                      </div>
+                    ))}
+                    <div className="text-right text-[10px] text-gray-400">
+                      目前分配總計：{newExpense.currency} ${newExpense.selectedMembers.reduce((sum, m) => sum + (parseFloat(newExpense.customAmounts[m]) || 0), 0).toFixed(0)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <input type="text" placeholder="備註說明 (選填)" value={newExpense.note} onChange={e => setNewExpense({...newExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" />
             <button onClick={handleAddExpenseSubmit} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存紀錄</button>
@@ -1358,14 +1405,14 @@ export default function App() {
       {/* 編輯花費 Modal */}
       {editingExpense && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-4 space-y-3 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-bold text-sm" style={{ color: THEME.primary }}>✏️ 修改花費明細</h3>
               <button onClick={() => setEditingExpense(null)} className="text-gray-400 font-bold cursor-pointer">✕</button>
             </div>
             <input type="text" value={editingExpense.item} onChange={e => setEditingExpense({...editingExpense, item: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="項目" />
             <div className="grid grid-cols-2 gap-2">
-              <input type="number" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: parseFloat(e.target.value) || 0})} className="p-2 text-xs border rounded-lg" placeholder="金額" />
+              <input type="number" value={editingExpense.amount} onChange={e => setEditingExpense({...editingExpense, amount: e.target.value})} className="p-2 text-xs border rounded-lg" placeholder="金額 (用於平均分攤)" />
               <select value={editingExpense.currency} onChange={e => setEditingExpense({...editingExpense, currency: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
                 <option value="MYR">馬幣 (MYR)</option>
                 <option value="TWD">台幣 (TWD)</option>
@@ -1373,20 +1420,17 @@ export default function App() {
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-gray-500">修改此費用包含的成員：</label>
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] font-bold text-gray-500">修改此費用包含的成員：</label>
+                <button type="button" onClick={() => setEditingExpense({ ...editingExpense, splitFor: [...members] })} className="text-[10px] font-bold text-amber-800 underline cursor-pointer">全選</button>
+              </div>
               <div className="grid grid-cols-2 gap-2 mt-1 p-2 bg-amber-50/60 rounded-xl border border-amber-200">
                 {members.map(m => (
                   <label key={m} className="flex items-center space-x-2 text-xs cursor-pointer">
                     <input
                       type="checkbox"
                       checked={editingExpense.splitFor.includes(m)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setEditingExpense({ ...editingExpense, splitFor: [...editingExpense.splitFor, m] });
-                        } else {
-                          setEditingExpense({ ...editingExpense, splitFor: editingExpense.splitFor.filter((x: string) => x !== m) });
-                        }
-                      }}
+                      onChange={() => toggleEditExpenseMember(m)}
                       className="rounded text-amber-800 focus:ring-amber-800"
                     />
                     <span className="font-medium text-slate-800">{m}</span>
@@ -1395,6 +1439,36 @@ export default function App() {
               </div>
             </div>
 
+            {editingExpense.splitFor.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex bg-gray-100 rounded-lg p-1 text-xs font-bold">
+                  <button type="button" onClick={() => setEditingExpense({ ...editingExpense, splitMode: 'equal' })} className={`flex-1 py-1.5 rounded-md cursor-pointer transition ${editingExpense.splitMode === 'equal' ? 'bg-white shadow text-amber-800' : 'text-gray-400'}`}>平均分攤</button>
+                  <button type="button" onClick={() => setEditingExpense({ ...editingExpense, splitMode: 'custom' })} className={`flex-1 py-1.5 rounded-md cursor-pointer transition ${editingExpense.splitMode === 'custom' ? 'bg-white shadow text-amber-800' : 'text-gray-400'}`}>自訂每人金額</button>
+                </div>
+
+                {editingExpense.splitMode === 'custom' && (
+                  <div className="space-y-1.5">
+                    <button type="button" onClick={applyEqualSplitToEditExpense} className="text-[10px] text-amber-800 underline cursor-pointer">⚖️ 用上方金額快速平均帶入</button>
+                    {editingExpense.splitFor.map((m: string) => (
+                      <div key={m} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+                        <span className="text-xs font-medium text-slate-700">{m}</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={editingExpense.customAmounts[m] || ''}
+                          onChange={e => setEditingExpense({ ...editingExpense, customAmounts: { ...editingExpense.customAmounts, [m]: e.target.value } })}
+                          className="w-24 p-1.5 text-xs border rounded-lg text-right"
+                        />
+                      </div>
+                    ))}
+                    <div className="text-right text-[10px] text-gray-400">
+                      目前分配總計：{editingExpense.currency} ${editingExpense.splitFor.reduce((sum: number, m: string) => sum + (parseFloat(editingExpense.customAmounts[m]) || 0), 0).toFixed(0)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <input type="text" value={editingExpense.note} onChange={e => setEditingExpense({...editingExpense, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg" placeholder="備註" />
             <button onClick={handleSaveEditExpense} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
@@ -1402,8 +1476,8 @@ export default function App() {
       )}
 
       {/* 底部 Tab */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40">
-        <div className="max-w-md mx-auto flex justify-around py-2.5 font-bold text-[10px]">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-amber-900/10 z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="max-w-md mx-auto flex justify-around py-3.5 font-bold text-[10px]">
           {[
             { id: 'itinerary', name: '行程總覽' },
             { id: 'rate', name: '匯率換算' },
@@ -1414,7 +1488,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center px-2 py-1 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
+              className={`flex flex-col items-center px-2 py-1.5 transition cursor-pointer ${activeTab === tab.id ? 'scale-110' : 'opacity-40'}`}
               style={{ color: activeTab === tab.id ? THEME.accent : THEME.primary }}
             >
               <span>{tab.name}</span>
