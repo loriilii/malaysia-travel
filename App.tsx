@@ -34,7 +34,7 @@ const DEFAULT_HOURLY_WEATHER = [
 // 完整 8 天行程 (依據使用者提供的行程表整理，景點皆補上簡介)
 const MASTER_ITINERARY = [
   {
-    day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
+    day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡豪亞酒店式公寓", lat: 3.1390, lng: 101.6869,
     items: [
       { id: "1-1", time: "06:45 前", name: "家 → 桃園機場", type: "交通", note: "辦理登機手續", map: "", img: "" },
       { id: "1-2", time: "08:45 - 13:25", name: "華航 CI72 航班 (08:45 起飛 → 13:25 抵達)", type: "交通", note: "抵達吉隆坡國際機場", map: "", img: "" },
@@ -50,7 +50,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/16 Sun.", title: "布城 & 馬六甲古城巡禮", city: "馬六甲", lat: 2.1896, lng: 102.2501,
+    day: "8/16 Sun.", title: "布城 & 馬六甲古城巡禮", city: "吉隆坡豪亞酒店式公寓", lat: 2.1896, lng: 102.2501,
     items: [
       { id: "2-1", time: "08:30 - 09:30", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
       { id: "2-2", time: "09:30 - 10:00", name: "包車出發，前往布城 (Putrajaya)", type: "交通", note: "車程約 30 分鐘", map: "", img: "" },
@@ -66,7 +66,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/17 Mon.", title: "吉隆坡城市漫遊", city: "吉隆坡", lat: 3.1390, lng: 101.6869,
+    day: "8/17 Mon.", title: "吉隆坡城市漫遊", city: "吉隆坡豪亞酒店式公寓", lat: 3.1390, lng: 101.6869,
     items: [
       { id: "3-1", time: "09:00 - 09:30", name: "Ready｜吉隆坡豪亞酒店式公寓 (收拾行李)", type: "住宿", note: "當晚需換房，請收好行李", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" },
       { id: "3-2", time: "09:30 - 10:30", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
@@ -80,7 +80,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/18 Tue.", title: "吉隆坡 → 檳城喬治市", city: "檳城", lat: 5.4141, lng: 100.3288,
+    day: "8/18 Tue.", title: "吉隆坡 → 檳城喬治市", city: "檳城雙威喬治市酒店", lat: 5.4141, lng: 100.3288,
     items: [
       { id: "4-1", time: "09:00", name: "Ready｜吉隆坡豪亞酒店式公寓", type: "住宿", note: "收拾行李準備退房", map: "https://maps.app.goo.gl/HWipQ6etWXGk3qdp8", img: "" },
       { id: "4-2", time: "09:00 - 10:45", name: "【早餐】chaFei Wisma Cosway 咖椰多士", type: "飲食", note: "美味咖椰吐司", map: "https://maps.app.goo.gl/goNaQNtVyjhxcSERA", img: "" },
@@ -96,7 +96,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/19 Wed.", title: "檳城自然探索", city: "檳城", lat: 5.4141, lng: 100.3288,
+    day: "8/19 Wed.", title: "檳城自然探索", city: "檳城雙威喬治市酒店", lat: 5.4141, lng: 100.3288,
     items: [
       { id: "5-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
       { id: "5-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
@@ -110,7 +110,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/20 Thu.", title: "檳城人文漫遊", city: "檳城", lat: 5.4141, lng: 100.3288,
+    day: "8/20 Thu.", title: "檳城人文漫遊", city: "檳城雙威喬治市酒店", lat: 5.4141, lng: 100.3288,
     items: [
       { id: "6-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
       { id: "6-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
@@ -125,7 +125,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/21 Fri.", title: "檳城海灘渡假", city: "檳城", lat: 5.4667, lng: 100.2452,
+    day: "8/21 Fri.", title: "檳城海灘渡假", city: "檳城香格里拉金沙酒店", lat: 5.4667, lng: 100.2452,
     items: [
       { id: "7-1", time: "09:00", name: "Ready｜檳城雙威喬治市酒店", type: "住宿", note: "退房前收拾行李", map: "https://maps.app.goo.gl/NqEmnTULihQ4FVVy9", img: "" },
       { id: "7-2", time: "09:00 - 10:00", name: "【早餐】", type: "飲食", note: "", map: "", img: "" },
@@ -140,7 +140,7 @@ const MASTER_ITINERARY = [
     ]
   },
   {
-    day: "8/22 Sat.", title: "檳城 → 臺灣", city: "檳城", lat: 5.2971, lng: 100.2768,
+    day: "8/22 Sat.", title: "檳城 → 臺灣", city: "溫暖的家", lat: 5.2971, lng: 100.2768,
     items: [
       { id: "8-1", time: "08:30 - 09:30", name: "早餐：飯店享用", type: "飲食", note: "", map: "", img: "" },
       { id: "8-2", time: "09:30 - 11:00", name: "Ready｜檳城香格里拉金沙酒店", type: "住宿", note: "退房、收拾行李", map: "https://maps.app.goo.gl/Pn9N6CRjeMv7c2Ks9", img: "" },
@@ -886,7 +886,7 @@ export default function App() {
 
             <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10">
               <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
-              <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
+              <p className="text-[10px] text-gray-400">🏠 本日住宿：{itinerary[selectedDayIdx].city}</p>
             </div>
 
             {/* 24 小時動態氣象 */}
@@ -1099,7 +1099,7 @@ export default function App() {
                   }}
                 />
                 <label htmlFor="new-shop-photo-input" className="text-[10px] font-bold text-amber-800 underline cursor-pointer">
-                  🖼️ 從相簿選擇照片 (選填)
+                  🖼️ 選擇照片
                 </label>
                 {newShopPhoto && (
                   <div className="relative">
