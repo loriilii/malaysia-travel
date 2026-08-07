@@ -884,16 +884,9 @@ export default function App() {
               ))}
             </div>
 
-            <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10 flex justify-between items-center">
-              <div>
-                <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
-                <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
-              </div>
-              {isEditMode && (
-                <button onClick={() => setShowAddSpotModal(true)} className="text-xs px-2.5 py-1.5 rounded-lg text-white font-bold shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>
-                  ➕ 新增行程
-                </button>
-              )}
+            <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10">
+              <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
+              <p className="text-[10px] text-gray-400">📍 區域：{itinerary[selectedDayIdx].city}</p>
             </div>
 
             {/* 24 小時動態氣象 */}
@@ -1093,7 +1086,6 @@ export default function App() {
                 <input
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   id="new-shop-photo-input"
                   className="hidden"
                   onChange={async (e) => {
@@ -1107,7 +1099,7 @@ export default function App() {
                   }}
                 />
                 <label htmlFor="new-shop-photo-input" className="text-[10px] font-bold text-amber-800 underline cursor-pointer">
-                  📷 拍照 / 選圖記錄 (選填)
+                  🖼️ 從相簿選擇照片 (選填)
                 </label>
                 {newShopPhoto && (
                   <div className="relative">
@@ -1136,7 +1128,6 @@ export default function App() {
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
                       id={`shop-photo-input-${s.id}`}
                       className="hidden"
                       onChange={async (e) => {
@@ -1150,7 +1141,7 @@ export default function App() {
                       }}
                     />
                     <label htmlFor={`shop-photo-input-${s.id}`} className="text-[10px] text-amber-800 underline cursor-pointer">
-                      {s.photo ? '重新拍照' : '📷 新增照片'}
+                      {s.photo ? '重新選擇照片' : '🖼️ 新增照片'}
                     </label>
                     {s.photo && (
                       <button onClick={() => setShoppingList(shoppingList.map(item => item.id === s.id ? { ...item, photo: null } : item))} className="text-[10px] text-gray-400 underline cursor-pointer">
@@ -1586,6 +1577,17 @@ export default function App() {
             <button onClick={handleSaveEditExpense} className="w-full py-2 text-xs font-bold text-white rounded-lg shadow cursor-pointer" style={{ backgroundColor: THEME.accent }}>儲存修改</button>
           </div>
         </div>
+      )}
+
+      {/* 新增行程：固定在畫面底部的浮動按鈕，不用滑到最上面找 */}
+      {activeTab === 'itinerary' && isEditMode && (
+        <button
+          onClick={() => setShowAddSpotModal(true)}
+          className="fixed left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-full text-white font-bold text-sm shadow-lg cursor-pointer flex items-center space-x-1.5"
+          style={{ backgroundColor: THEME.accent, bottom: 'calc(env(safe-area-inset-bottom) + 84px)' }}
+        >
+          <span>➕ 新增行程</span>
+        </button>
       )}
 
       {/* 底部 Tab */}
