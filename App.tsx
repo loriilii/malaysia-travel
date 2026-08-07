@@ -32,6 +32,18 @@ const DEFAULT_HOURLY_WEATHER = [
 ];
 
 // 完整 8 天行程 (依據使用者提供的行程表整理，景點皆補上簡介)
+// 每日住宿對照 (獨立於雲端行程資料，避免舊的雲端快取沒有 hotel 欄位時顯示空白)
+const HOTEL_BY_DAY = [
+  "吉隆坡豪亞酒店式公寓", // Day 1
+  "吉隆坡豪亞酒店式公寓", // Day 2
+  "吉隆坡豪亞酒店式公寓", // Day 3
+  "檳城雙威喬治市酒店",   // Day 4
+  "檳城雙威喬治市酒店",   // Day 5
+  "檳城雙威喬治市酒店",   // Day 6
+  "檳城香格里拉金沙酒店", // Day 7
+  "溫暖的家"              // Day 8
+];
+
 const MASTER_ITINERARY = [
   {
     day: "8/15 Sat.", title: "臺灣 → 吉隆坡", city: "吉隆坡", hotel: "吉隆坡豪亞酒店式公寓", lat: 3.1390, lng: 101.6869,
@@ -897,7 +909,7 @@ export default function App() {
 
               <div className="p-3 bg-white rounded-xl shadow-xs border border-amber-900/10 mt-2">
                 <h2 className="font-bold text-sm" style={{ color: THEME.primary }}>Day {selectedDayIdx + 1}: {itinerary[selectedDayIdx].title}</h2>
-                <p className="text-[10px] text-gray-400">🏠 本日住宿：{itinerary[selectedDayIdx].hotel}</p>
+                <p className="text-[10px] text-gray-400">🏠 本日住宿：{itinerary[selectedDayIdx].hotel || HOTEL_BY_DAY[selectedDayIdx] || '—'}</p>
               </div>
             </div>
 
