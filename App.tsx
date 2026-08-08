@@ -525,7 +525,7 @@ export default function App() {
         setBotRate({ cashBuy: data.cashBuy, cashSell: data.cashSell, updatedAt: timeStr, error: false });
       } else {
         setBotRate(prev => ({ ...prev, error: true }));
-        if (isManual) alert(`🔴 台灣銀行匯率取得失敗：${data.error || '未知錯誤'}`);
+        if (isManual) alert(`🔴 台灣銀行匯率取得失敗：${data.error || '未知錯誤'}${data.debugPreview ? `\n\n除錯內容：\n${data.debugPreview}` : ''}`);
       }
     } catch (e) {
       console.error('BOT rate fetch error:', e);
