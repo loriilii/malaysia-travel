@@ -8,6 +8,14 @@ const THEME = {
   sand: '#D4AF83'
 };
 
+// 行程項目類型：各自的顏色與 icon
+const TYPE_STYLES: Record<string, { bg: string; icon: string }> = {
+  '交通': { bg: '#2563EB', icon: '🚗' },
+  '景點': { bg: '#059669', icon: '📍' },
+  '飲食': { bg: '#EA580C', icon: '🍽️' },
+  '住宿': { bg: '#7C3AED', icon: '🏨' }
+};
+
 // ☁️ 全團唯一固定的 Google Firebase 實時資料庫端點 (全手機 100% 互通)
 const FIXED_FIREBASE_URL = "https://malaysia-trip-2026-ec3e3-default-rtdb.asia-southeast1.firebasedatabase.app/master_trip.json";
 const LOCAL_BACKUP_KEY = "MY_MALAYSIA_TRIP_LOCAL_STORAGE_BACKUP_V5";
@@ -960,7 +968,9 @@ export default function App() {
                   <div className="p-3.5">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center space-x-2">
-                        <span className="text-[10px] px-2 py-0.5 rounded font-bold text-white" style={{ backgroundColor: THEME.primary }}>{spot.type}</span>
+                        <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-bold text-white" style={{ backgroundColor: TYPE_STYLES[spot.type]?.bg || THEME.primary }}>
+                          <span>{TYPE_STYLES[spot.type]?.icon}</span>{spot.type}
+                        </span>
                         <span className="text-xs text-gray-400 font-mono">{spot.time}</span>
                       </div>
 
@@ -1417,10 +1427,10 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2">
               <input type="text" value={editingSpot.time} onChange={e => setEditingSpot({...editingSpot, time: e.target.value})} className="p-2 text-xs border rounded-lg" placeholder="時間" />
               <select value={editingSpot.type} onChange={e => setEditingSpot({...editingSpot, type: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
-                <option value="景點">景點</option>
-                <option value="飲食">飲食</option>
-                <option value="交通">交通</option>
-                <option value="住宿">住宿</option>
+                <option value="景點">📍 景點</option>
+                <option value="飲食">🍽️ 飲食</option>
+                <option value="交通">🚗 交通</option>
+                <option value="住宿">🏨 住宿</option>
               </select>
             </div>
             <textarea value={editingSpot.note} onChange={e => setEditingSpot({...editingSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" placeholder="備註說明" />
@@ -1443,10 +1453,10 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2">
               <input type="text" placeholder="時間 (如 15:30)" value={newSpot.time} onChange={e => setNewSpot({...newSpot, time: e.target.value})} className="p-2 text-xs border rounded-lg" />
               <select value={newSpot.type} onChange={e => setNewSpot({...newSpot, type: e.target.value})} className="p-2 text-xs border rounded-lg bg-white">
-                <option value="景點">景點</option>
-                <option value="飲食">飲食</option>
-                <option value="交通">交通</option>
-                <option value="住宿">住宿</option>
+                <option value="景點">📍 景點</option>
+                <option value="飲食">🍽️ 飲食</option>
+                <option value="交通">🚗 交通</option>
+                <option value="住宿">🏨 住宿</option>
               </select>
             </div>
             <textarea placeholder="說明/備註" value={newSpot.note} onChange={e => setNewSpot({...newSpot, note: e.target.value})} className="w-full p-2 text-xs border rounded-lg h-16" />
