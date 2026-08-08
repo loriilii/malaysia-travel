@@ -7,7 +7,15 @@
 
 export default async function handler(req, res) {
   try {
-    const response = await fetch('https://rate.bot.com.tw/xrt/flcsv/0/day');
+    const response = await fetch('https://rate.bot.com.tw/xrt/flcsv/0/day', {
+      headers: {
+        // 台灣銀行網站對非瀏覽器的請求（例如沒有 User-Agent 的伺服器端請求）常會擋下或回傳錯誤頁，
+        // 這裡偽裝成一般瀏覽器，避免被擋。
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/csv,text/plain,*/*'
+      }
+    });
+
     if (!response.ok) {
       res.status(502).json({ error: `Bank of Taiwan 回應異常 (HTTP ${response.status})` });
       return;
@@ -19,7 +27,12 @@ export default async function handler(req, res) {
     const myrLine = lines.find((line) => line.startsWith('MYR,'));
 
     if (!myrLine) {
-      res.status(404).json({ error: '在台灣銀行資料中找不到馬來幣 (MYR)' });
+      // 找不到 MYR 這一行時，回傳一小段原始回應內容方便除錯 (例如台銀改回錯誤頁、格式變動等)
+      res.status(404).json({
+        error: '在台灣銀行資料中找不到馬來幣 (MYR)',
+        debugPreview: text.slice(0, 300),
+        debugLineCount: lines.length
+      });
       return;
     }
 
