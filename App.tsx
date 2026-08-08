@@ -511,36 +511,6 @@ export default function App() {
     return () => clearInterval(rateInterval);
   }, []);
 
-  // 🏦 台灣銀行 MYR 現金匯率 (透過自家的 /api/bot-rate 代抓，避開瀏覽器 CORS 限制)
-  const [botRate, setBotRate] = useState<{ cashBuy: number | null; cashSell: number | null; updatedAt: string; error: boolean }>({ cashBuy: null, cashSell: null, updatedAt: '', error: false });
-  const [botRateLoading, setBotRateLoading] = useState(false);
-
-  const fetchBotRate = async (isManual = false) => {
-    setBotRateLoading(true);
-    try {
-      const res = await fetch('/api/bot-rate');
-      const data = await res.json();
-      if (res.ok && data.cashBuy && data.cashSell) {
-        const timeStr = new Date().toLocaleString('zh-TW', { hour12: false });
-        setBotRate({ cashBuy: data.cashBuy, cashSell: data.cashSell, updatedAt: timeStr, error: false });
-      } else {
-        setBotRate(prev => ({ ...prev, error: true }));
-        if (isManual) alert(`🔴 台灣銀行匯率取得失敗：${data.error || '未知錯誤'}${data.debugPreview ? `\n\n除錯內容：\n${data.debugPreview}` : ''}`);
-      }
-    } catch (e) {
-      console.error('BOT rate fetch error:', e);
-      setBotRate(prev => ({ ...prev, error: true }));
-      if (isManual) alert('🔴 台灣銀行匯率查詢失敗，請確認 /api/bot-rate 是否已部署');
-    }
-    setBotRateLoading(false);
-  };
-
-  useEffect(() => {
-    fetchBotRate(false);
-    const botRateInterval = setInterval(() => fetchBotRate(false), 30 * 60 * 1000);
-    return () => clearInterval(botRateInterval);
-  }, []);
-
   useEffect(() => {
     if (!rateInfo.rate) return;
     const myrNum = parseFloat(amountMYR);
@@ -1361,41 +1331,6 @@ export default function App() {
                 )}
                 {rateInfo.error && <div className="text-[10px] text-red-300 mt-1">⚠️ 上次更新失敗，目前顯示為快取匯率</div>}
                 <div className="text-[10px] text-slate-400 mt-2">此為市場中間價，僅供參考換算，非銀行實際交易匯率</div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-amber-900/10 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold" style={{ color: THEME.primary }}>🏦 臺灣銀行 現金匯率</span>
-                <button
-                  onClick={() => fetchBotRate(true)}
-                  className="text-[10px] bg-amber-50 hover:bg-amber-100 active:scale-95 px-2.5 py-1 rounded-full flex items-center space-x-1 border border-amber-200 transition cursor-pointer text-amber-800"
-                >
-                  {botRateLoading ? '🔄 更新中...' : '🔄 手動更新'}
-                </button>
-              </div>
-              {botRate.cashSell && botRate.cashBuy ? (
-                <>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <div className="bg-amber-50/60 border border-amber-100 rounded-xl p-2.5 text-center">
-                      <div className="text-[10px] text-gray-500">買入 MYR 現鈔<br/>(你付台幣)</div>
-                      <div className="text-lg font-black text-amber-900 mt-1">{botRate.cashSell.toFixed(3)}</div>
-                      <div className="text-[9px] text-gray-400">TWD / 1 MYR</div>
-                    </div>
-                    <div className="bg-amber-50/60 border border-amber-100 rounded-xl p-2.5 text-center">
-                      <div className="text-[10px] text-gray-500">賣出 MYR 現鈔<br/>(換回台幣)</div>
-                      <div className="text-lg font-black text-amber-900 mt-1">{botRate.cashBuy.toFixed(3)}</div>
-                      <div className="text-[9px] text-gray-400">TWD / 1 MYR</div>
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-gray-400 text-center pt-1">最後更新：{botRate.updatedAt}</div>
-                </>
-              ) : (
-                <div className="text-xs text-gray-400 py-2 text-center">{botRateLoading ? '台灣銀行匯率讀取中...' : '尚無資料，請確認 /api/bot-rate 已部署'}</div>
-              )}
-              {botRate.error && <div className="text-[10px] text-red-500 text-center">⚠️ 上次更新失敗，可能是尚未部署 /api/bot-rate</div>}
-              <div className="text-[10px] text-gray-400 leading-relaxed pt-1">
-                現金匯率有買賣價差，通常比市場即時匯率略差，才是實際到銀行臨櫃換鈔會拿到的價格。資料來源：臺灣銀行牌告匯率，每 30 分鐘自動更新一次。
               </div>
             </div>
 
